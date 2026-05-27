@@ -1,13 +1,12 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
 
-// ─── ELEVENLABS VOICE IDS (multilingual) ─────────────────────────
-// D: voz firme masculina | I: voz energica | S: voz suave | C: voz neutra
+// DISC voice personality via Web Speech API (pitch/rate vary per profile)
 const DISC_VOICES = {
-  D: { voiceId: "pNInz6obpgDQGcFmaJgB", name: "Adam" },
-  I: { voiceId: "EXAVITQu4vr4xnSDxMaL", name: "Bella" },
-  S: { voiceId: "21m00Tcm4TlvDq8ikWAM", name: "Rachel" },
-  C: { voiceId: "AZnzlk1XvdvUeBnXmlld", name: "Domi" },
+  D: { pitch: 0.9, rate: 1.15 },
+  I: { pitch: 1.2, rate: 1.1  },
+  S: { pitch: 1.1, rate: 0.9  },
+  C: { pitch: 0.95, rate: 0.95 },
 };
 
 const DISC_PROFILES = {
@@ -109,30 +108,26 @@ export default function Home() {
     return rec;
   }, []);
 
-  // ── TTS ────────────────────────────────────────────────────────
+  // ── TTS (Web Speech API) ───────────────────────────────────────
   const speak = useCallback(async (text, discKey) => {
-    const voiceId = DISC_VOICES[discKey]?.voiceId;
     setClientSpeaking(true);
     setStatusText("Cliente hablando...");
-    try {
-      const res = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voiceId }),
-      });
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      await new Promise(resolve => {
-        audio.onended = resolve;
-        audio.onerror = resolve;
-        audio.play();
-      });
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error("TTS error:", e);
-    }
+    await new Promise(resolve => {
+      const synth = window.speechSynthesis;
+      synth.cancel();
+      const utt = new SpeechSynthesisUtterance(text);
+      utt.lang = "es-CL";
+      const profile = DISC_VOICES[discKey] || {};
+      utt.pitch = profile.pitch ?? 1;
+      utt.rate  = profile.rate  ?? 1;
+      // pick a Spanish voice if available
+      const voices = synth.getVoices();
+      const esVoice = voices.find(v => v.lang.startsWith("es")) || null;
+      if (esVoice) utt.voice = esVoice;
+      utt.onend = resolve;
+      utt.onerror = resolve;
+      synth.speak(utt);
+    });
     setClientSpeaking(false);
     setStatusText("");
   }, []);
@@ -228,7 +223,7 @@ export default function Home() {
 
   // ── EVALUATE ─────────────────────────────────────────────────
   const endCall = async () => {
-    if (audioRef.current) audioRef.current.pause();
+    window.speechSynthesis?.cancel();
     if (recognitionRef.current) recognitionRef.current.abort();
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach(t => t.stop());
