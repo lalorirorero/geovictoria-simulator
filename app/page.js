@@ -92,6 +92,7 @@ export default function Home() {
   const recognitionRef = useRef(null);
   const audioRef = useRef(null);
   const isListeningRef = useRef(false);
+  const micStreamRef = useRef(null);
 
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
@@ -202,6 +203,11 @@ export default function Home() {
     setPhase("call");
     setLoading(true);
     setStatusText("Conectando...");
+    try {
+      micStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setStatusText("Sin acceso al microfono");
+    }
     const system = buildSystem(prof.discKey, prof.industry, prof.nombre, prof.cargo);
     const res = await fetch("/api/chat", {
       method: "POST",
@@ -224,6 +230,10 @@ export default function Home() {
   const endCall = async () => {
     if (audioRef.current) audioRef.current.pause();
     if (recognitionRef.current) recognitionRef.current.abort();
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach(t => t.stop());
+      micStreamRef.current = null;
+    }
     setPhase("evaluating");
     const fullTranscript = transcript.join("\n\n");
     const res = await fetch("/api/evaluate", {
