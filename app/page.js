@@ -1,12 +1,12 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
 
-// DISC voice personality via Web Speech API (pitch/rate vary per profile)
+// DISC → ElevenLabs voice IDs (premade voices available on free plan)
 const DISC_VOICES = {
-  D: { pitch: 0.9, rate: 1.15 },
-  I: { pitch: 1.2, rate: 1.1  },
-  S: { pitch: 1.1, rate: 0.9  },
-  C: { pitch: 0.95, rate: 0.95 },
+  D: { voiceId: "pNInz6obpgDQGcFmaJgB" }, // Adam — Dominant, Firm
+  I: { voiceId: "TX3LPaxmHKxFdv7VOQHJ" }, // Liam — Energetic
+  S: { voiceId: "EXAVITQu4vr4xnSDxMaL" }, // Sarah — Mature, Reassuring
+  C: { voiceId: "onwK4e9ZLuTAKqWW03F9" }, // Daniel — Steady, Neutral
 };
 
 const DISC_PROFILES = {
@@ -108,26 +108,31 @@ export default function Home() {
     return rec;
   }, []);
 
-  // ── TTS (Web Speech API) ───────────────────────────────────────
+  // ── TTS (ElevenLabs) ──────────────────────────────────────────
   const speak = useCallback(async (text, discKey) => {
+    const voiceId = DISC_VOICES[discKey]?.voiceId;
     setClientSpeaking(true);
     setStatusText("Cliente hablando...");
-    await new Promise(resolve => {
-      const synth = window.speechSynthesis;
-      synth.cancel();
-      const utt = new SpeechSynthesisUtterance(text);
-      utt.lang = "es-CL";
-      const profile = DISC_VOICES[discKey] || {};
-      utt.pitch = profile.pitch ?? 1;
-      utt.rate  = profile.rate  ?? 1;
-      // pick a Spanish voice if available
-      const voices = synth.getVoices();
-      const esVoice = voices.find(v => v.lang.startsWith("es")) || null;
-      if (esVoice) utt.voice = esVoice;
-      utt.onend = resolve;
-      utt.onerror = resolve;
-      synth.speak(utt);
-    });
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, voiceId }),
+      });
+      if (!res.ok) throw new Error("tts failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      await new Promise(resolve => {
+        audio.onended = resolve;
+        audio.onerror = resolve;
+        audio.play();
+      });
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("TTS error:", e);
+    }
     setClientSpeaking(false);
     setStatusText("");
   }, []);
@@ -223,7 +228,7 @@ export default function Home() {
 
   // ── EVALUATE ─────────────────────────────────────────────────
   const endCall = async () => {
-    window.speechSynthesis?.cancel();
+    if (audioRef.current) audioRef.current.pause();
     if (recognitionRef.current) recognitionRef.current.abort();
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach(t => t.stop());
