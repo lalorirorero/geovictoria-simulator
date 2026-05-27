@@ -5,7 +5,7 @@ export async function POST(req) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "xi-api-key": process.env.ELEVENLABS_API_KEY,
+        "xi-api-key": (process.env.ELEVENLABS_API_KEY || "").trim(),
       },
       body: JSON.stringify({
         text,
