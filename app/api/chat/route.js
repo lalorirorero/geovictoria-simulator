@@ -1,11 +1,13 @@
 export async function POST(req) {
   try {
     const { messages, system } = await req.json();
+    const key = (process.env.ANTHROPIC_API_KEY || "").trim();
+    console.log("KEY debug — defined:", !!key, "length:", key.length, "prefix:", key.slice(0, 14));
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": (process.env.ANTHROPIC_API_KEY || "").trim(),
+        "x-api-key": key,
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
