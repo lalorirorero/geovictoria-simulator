@@ -1,13 +1,15 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
 
-// DISC → ElevenLabs voice IDs (premade voices available on free plan)
+// DISC → ElevenLabs voice IDs by gender (premade voices, free plan)
 const DISC_VOICES = {
-  D: { voiceId: "pNInz6obpgDQGcFmaJgB" }, // Adam — Dominant, Firm
-  I: { voiceId: "TX3LPaxmHKxFdv7VOQHJ" }, // Liam — Energetic
-  S: { voiceId: "EXAVITQu4vr4xnSDxMaL" }, // Sarah — Mature, Reassuring
-  C: { voiceId: "onwK4e9ZLuTAKqWW03F9" }, // Daniel — Steady, Neutral
+  D: { m: "pNInz6obpgDQGcFmaJgB", f: "Xb7hH8MSUJpSbSDYk0k2" }, // Adam / Alice
+  I: { m: "TX3LPaxmHKxFdv7VOQHJ", f: "cgSgspJ2msm6clMCkdW9" }, // Liam / Jessica
+  S: { m: "nPczCjzI2devNBz1zQrb",  f: "EXAVITQu4vr4xnSDxMaL" }, // Brian / Sarah
+  C: { m: "onwK4e9ZLuTAKqWW03F9", f: "XrExE9yKIg1WjnnlVkGX" }, // Daniel / Matilda
 };
+
+const NOMBRES_F = new Set(["Ana Morales", "Patricia Jimenez", "Monica Torres"]);
 
 const DISC_PROFILES = {
   D: { name: "Dominante", color: "#EF4444", bg: "#FEF2F2", emoji: "🔴",
@@ -109,8 +111,9 @@ export default function Home() {
   }, []);
 
   // ── TTS (ElevenLabs) ──────────────────────────────────────────
-  const speak = useCallback(async (text, discKey) => {
-    const voiceId = DISC_VOICES[discKey]?.voiceId;
+  const speak = useCallback(async (text, discKey, nombre) => {
+    const gender = NOMBRES_F.has(nombre) ? "f" : "m";
+    const voiceId = DISC_VOICES[discKey]?.[gender];
     setClientSpeaking(true);
     setStatusText("Cliente hablando...");
     try {
@@ -181,7 +184,7 @@ export default function Home() {
       setMessages([...newMessages, assistantMsg]);
       setTranscript(t => [...t, `${prof.nombre}: ${reply}`]);
 
-      await speak(reply, prof.discKey);
+      await speak(reply, prof.discKey, prof.nombre);
     };
 
     rec.onerror = () => {
@@ -223,7 +226,7 @@ export default function Home() {
     setMessages([msg]);
     setTranscript([`${prof.nombre}: ${opening}`]);
     setLoading(false);
-    await speak(opening, prof.discKey);
+    await speak(opening, prof.discKey, prof.nombre);
   };
 
   // ── EVALUATE ─────────────────────────────────────────────────
