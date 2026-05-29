@@ -233,16 +233,41 @@ export default function App() {
     } catch {}
   };
 
+  const sendText = async (text, currentMessages) => {
+    if (!text.trim() || loading) return;
+    const userMsg = { role: "user", content: text };
+    const newMessages = [...currentMessages, userMsg];
+    setMessages(newMessages);
+    setInput("");
+    setLoading(true);
+    setClientSpeaking(true);
+
+    const sys = buildSystemPrompt(profile);
+    const apiMessages = newMessages.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }));
+    const reply = await callClaude(apiMessages, sys);
+    setMessages([...newMessages, { role: "assistant", content: reply }]);
+    setClientSpeaking(false);
+    setLoading(false);
+    setTurnCount(t => t + 1);
+    speak(reply, profile.discKey, profile.nombre);
+  };
+
+  const sendMessage = () => sendText(input, messages);
+
   const startListening = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR || listening) return;
+    if (!SR || listening || loading) return;
+    const snapshot = messages;
     const rec = new SR();
     rec.lang = "es-CL";
     rec.continuous = false;
     rec.interimResults = false;
     rec.onstart = () => setListening(true);
     rec.onend = () => setListening(false);
-    rec.onresult = (e) => setInput(prev => (prev + " " + e.results[0][0].transcript).trim());
+    rec.onresult = (e) => {
+      const text = e.results[0][0].transcript;
+      sendText(text, snapshot);
+    };
     rec.start();
   };
 
@@ -269,25 +294,6 @@ export default function App() {
     setLoading(false);
     speak(opening, profile.discKey, profile.nombre);
     setTimeout(() => inputRef.current?.focus(), 100);
-  };
-
-  const sendMessage = async () => {
-    if (!input.trim() || loading) return;
-    const userMsg = { role: "user", content: input };
-    const newMessages = [...messages, userMsg];
-    setMessages(newMessages);
-    setInput("");
-    setLoading(true);
-    setClientSpeaking(true);
-
-    const sys = buildSystemPrompt(profile);
-    const apiMessages = newMessages.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }));
-    const reply = await callClaude(apiMessages, sys);
-    setMessages([...newMessages, { role: "assistant", content: reply }]);
-    setClientSpeaking(false);
-    setLoading(false);
-    setTurnCount(t => t + 1);
-    speak(reply, profile.discKey, profile.nombre);
   };
 
   const endCall = async () => {
