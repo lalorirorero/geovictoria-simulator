@@ -128,22 +128,24 @@ function generateProfile(discKey, industryKey, rolKey) {
 }
 
 async function callClaude(messages, system, maxTokens = 300) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch("/api/chat", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: maxTokens,
-      system,
-      messages,
-    }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages, system, maxTokens }),
   });
   const data = await res.json();
-  return data.content?.map(b => b.text || "").join("") || "";
+  return data.text || "";
+}
+
+// ─── VOICE ───────────────────────────────────────────────────────
+const VOICES = {
+  male:   { D: "pNInz6obpgDQGcFmaJgB", I: "TX3LPaxmHKxFdv7VOQHJ", S: "nPczCjzI2devNBz1zQrb", C: "onwK4e9ZLuTAKqWW03F9" },
+  female: { D: "Xb7hH8MSUJpSbSDYk0k2", I: "cgSgspJ2msm6clMkppW",  S: "EXAVITQu4vr4xnSDxMaL", C: "XrExE9yKIg1WjnnlVkGG" },
+};
+const FEMALE_NAMES = ["Ana", "Patricia", "Monica"];
+function getVoiceId(discKey, nombre) {
+  const gender = FEMALE_NAMES.some(n => nombre.startsWith(n)) ? "female" : "male";
+  return VOICES[gender][discKey];
 }
 
 // ─── AVATAR ──────────────────────────────────────────────────────
@@ -202,6 +204,8 @@ export default function App() {
   const [turnCount, setTurnCount] = useState(0);
   const chatRef = useRef(null);
   const inputRef = useRef(null);
+  const audioRef = useRef(null);
+  const [listening, setListening] = useState(false);
 
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
@@ -210,6 +214,37 @@ export default function App() {
   const [selectedDisc, setSelectedDisc] = useState(null);
   const [selectedIndustry, setSelectedIndustry] = useState(null);
   const [selectedRol, setSelectedRol] = useState(null);
+
+  const speak = async (text, discKey, nombre) => {
+    try {
+      const voiceId = getVoiceId(discKey, nombre);
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, voiceId }),
+      });
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      if (audioRef.current) { audioRef.current.pause(); URL.revokeObjectURL(audioRef.current.src); }
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.play();
+    } catch {}
+  };
+
+  const startListening = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR || listening) return;
+    const rec = new SR();
+    rec.lang = "es-CL";
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.onstart = () => setListening(true);
+    rec.onend = () => setListening(false);
+    rec.onresult = (e) => setInput(prev => (prev + " " + e.results[0][0].transcript).trim());
+    rec.start();
+  };
 
   const startSimulation = (discKey, industryKey, rolKey) => {
     const p = generateProfile(discKey, industryKey, rolKey);
@@ -232,6 +267,7 @@ export default function App() {
     setMessages([msg]);
     setClientSpeaking(false);
     setLoading(false);
+    speak(opening, profile.discKey, profile.nombre);
     setTimeout(() => inputRef.current?.focus(), 100);
   };
 
@@ -251,9 +287,11 @@ export default function App() {
     setClientSpeaking(false);
     setLoading(false);
     setTurnCount(t => t + 1);
+    speak(reply, profile.discKey, profile.nombre);
   };
 
   const endCall = async () => {
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
     setPhase("evaluating");
     const transcript = messages.map(m =>
       `${m.role === "user" ? "EJECUTIVO" : profile.nombre}: ${m.content}`
@@ -617,6 +655,12 @@ export default function App() {
                     display: "flex", alignItems: "center", justifyContent: "center",
                     opacity: loading || !input.trim() ? 0.35 : 1, transition: "all .2s",
                   }}>↑</button>
+                <button className="btn" onClick={startListening} title="Hablar"
+                  style={{
+                    background: listening ? "#10B981" : "#1E2D45", border: `2px solid ${listening ? "#10B981" : "#2E3D5A"}`,
+                    borderRadius: 9, width: 38, height: 38, cursor: "pointer", fontSize: 16,
+                    display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s",
+                  }}>🎙️</button>
                 <button className="btn" onClick={endCall} title="Terminar llamada y evaluar"
                   style={{
                     background: "#EF4444", border: "none", borderRadius: 9,
