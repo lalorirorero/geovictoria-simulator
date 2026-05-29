@@ -1,8 +1,7 @@
 export async function POST(req) {
   try {
-    const { messages, system } = await req.json();
+    const { messages, system, maxTokens = 300, model = "claude-haiku-4-5-20251001" } = await req.json();
     const key = (process.env.ANTHROPIC_API_KEY || "").trim();
-    console.log("KEY debug — defined:", !!key, "length:", key.length, "prefix:", key.slice(0, 14));
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -11,8 +10,8 @@ export async function POST(req) {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 300,
+        model,
+        max_tokens: maxTokens,
         system,
         messages,
       }),
