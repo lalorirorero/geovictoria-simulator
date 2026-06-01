@@ -194,81 +194,99 @@ function ScoreBadge({ score }) {
 
 // ─── MAIN APP ────────────────────────────────────────────────────
 export default function App() {
-  const [phase, setPhase] = useState("lobby"); // lobby | briefing | call | evaluating | results
+  const [phase, setPhase] = useState("lobby");
   const [profile, setProfile] = useState(null);
-  const [messages, setMessages] = useState([]); // {role, content}
-  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [clientSpeaking, setClientSpeaking] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [lastUserLine, setLastUserLine] = useState("");
   const [evaluation, setEvaluation] = useState(null);
   const [turnCount, setTurnCount] = useState(0);
-  const chatRef = useRef(null);
-  const inputRef = useRef(null);
   const audioRef = useRef(null);
-  const [listening, setListening] = useState(false);
-
-  useEffect(() => {
-    if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
-  }, [messages]);
+  const recRef = useRef(null);
+  const messagesRef = useRef([]);
+  const phaseRef = useRef("lobby");
+  const loadingRef = useRef(false);
 
   const [selectedDisc, setSelectedDisc] = useState(null);
   const [selectedIndustry, setSelectedIndustry] = useState(null);
   const [selectedRol, setSelectedRol] = useState(null);
 
-  const speak = async (text, discKey, nombre) => {
-    try {
-      const voiceId = getVoiceId(discKey, nombre);
-      const res = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voiceId }),
-      });
-      if (!res.ok) return;
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      if (audioRef.current) { audioRef.current.pause(); URL.revokeObjectURL(audioRef.current.src); }
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      audio.play();
-    } catch {}
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
+  useEffect(() => { loadingRef.current = loading; }, [loading]);
+
+  const stopListening = () => {
+    if (recRef.current) { try { recRef.current.abort(); } catch {} recRef.current = null; }
+    setListening(false);
   };
 
-  const sendText = async (text, currentMessages) => {
-    if (!text.trim() || loading) return;
-    const userMsg = { role: "user", content: text };
-    const newMessages = [...currentMessages, userMsg];
-    setMessages(newMessages);
-    setInput("");
-    setLoading(true);
-    setClientSpeaking(true);
-
-    const sys = buildSystemPrompt(profile);
-    const apiMessages = newMessages.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }));
-    const reply = await callClaude(apiMessages, sys);
-    setMessages([...newMessages, { role: "assistant", content: reply }]);
-    setClientSpeaking(false);
-    setLoading(false);
-    setTurnCount(t => t + 1);
-    speak(reply, profile.discKey, profile.nombre);
-  };
-
-  const sendMessage = () => sendText(input, messages);
-
-  const startListening = () => {
+  const autoListen = (profileSnap) => {
+    if (phaseRef.current !== "call") return;
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR || listening || loading) return;
-    const snapshot = messages;
+    if (!SR) return;
+    stopListening();
     const rec = new SR();
     rec.lang = "es-CL";
     rec.continuous = false;
     rec.interimResults = false;
     rec.onstart = () => setListening(true);
     rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
     rec.onresult = (e) => {
       const text = e.results[0][0].transcript;
-      sendText(text, snapshot);
+      if (text.trim()) sendVoice(text, profileSnap);
     };
-    rec.start();
+    recRef.current = rec;
+    try { rec.start(); } catch {}
+  };
+
+  const speak = async (text, profileSnap) => {
+    setClientSpeaking(true);
+    try {
+      const voiceId = getVoiceId(profileSnap.discKey, profileSnap.nombre);
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, voiceId }),
+      });
+      if (audioRef.current) { audioRef.current.pause(); }
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        audio.onended = () => { setClientSpeaking(false); autoListen(profileSnap); };
+        audio.play();
+        return;
+      }
+    } catch {}
+    setClientSpeaking(false);
+    autoListen(profileSnap);
+  };
+
+  const sendVoice = async (text, profileSnap) => {
+    if (loadingRef.current) return;
+    stopListening();
+    setLastUserLine(text);
+    const current = messagesRef.current;
+    const userMsg = { role: "user", content: text };
+    const newMessages = [...current, userMsg];
+    setMessages(newMessages);
+    setLoading(true);
+    loadingRef.current = true;
+
+    const sys = buildSystemPrompt(profileSnap);
+    const apiMessages = newMessages.map(m => ({ role: m.role, content: m.content }));
+    const reply = await callClaude(apiMessages, sys);
+    const final = [...newMessages, { role: "assistant", content: reply }];
+    setMessages(final);
+    messagesRef.current = final;
+    setLoading(false);
+    loadingRef.current = false;
+    setTurnCount(t => t + 1);
+    speak(reply, profileSnap);
   };
 
   const startSimulation = (discKey, industryKey, rolKey) => {
@@ -279,27 +297,29 @@ export default function App() {
     setPhase("briefing");
   };
 
-  const beginCall = async () => {
+  const beginCall = async (profileSnap) => {
     setPhase("call");
+    phaseRef.current = "call";
     setLoading(true);
-    setClientSpeaking(true);
-    const sys = buildSystemPrompt(profile);
+    loadingRef.current = true;
+    const sys = buildSystemPrompt(profileSnap);
     const opening = await callClaude(
       [{ role: "user", content: "Hola, gracias por tomar la llamada." }],
       sys
     );
-    const msg = { role: "assistant", content: opening };
-    setMessages([msg]);
-    setClientSpeaking(false);
+    const initial = [{ role: "assistant", content: opening }];
+    setMessages(initial);
+    messagesRef.current = initial;
     setLoading(false);
-    speak(opening, profile.discKey, profile.nombre);
-    setTimeout(() => inputRef.current?.focus(), 100);
+    loadingRef.current = false;
+    speak(opening, profileSnap);
   };
 
   const endCall = async () => {
+    stopListening();
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
     setPhase("evaluating");
-    const transcript = messages.map(m =>
+    const transcript = messagesRef.current.map(m =>
       `${m.role === "user" ? "EJECUTIVO" : profile.nombre}: ${m.content}`
     ).join("\n\n");
 
@@ -526,7 +546,7 @@ export default function App() {
             </div>
           </div>
 
-          <button className="btn" onClick={beginCall} style={{
+          <button className="btn" onClick={() => beginCall(profile)} style={{
             background: "linear-gradient(135deg, #EF4444, #DC2626)",
             border: "none", borderRadius: 12, padding: "16px",
             color: "#fff", fontSize: 14, fontWeight: 700,
@@ -540,145 +560,83 @@ export default function App() {
         </div>
       )}
 
-      {/* ── CALL ── */}
+      {/* ── CALL (voice-only) ── */}
       {phase === "call" && disc && (
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100vh" }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100vh", background: "#060A12", position: "relative" }}>
 
-          {/* Video area */}
-          <div style={{
-            position: "relative", background: "#060A12",
-            flex: "0 0 220px", display: "flex", alignItems: "center", justifyContent: "center",
-            overflow: "hidden",
-          }}>
-            {/* Grid background */}
-            <div style={{
-              position: "absolute", inset: 0,
-              backgroundImage: "linear-gradient(#0D0D14 1px, transparent 1px), linear-gradient(90deg, #0D0D14 1px, transparent 1px)",
-              backgroundSize: "40px 40px", opacity: 0.6,
-            }} />
+          {/* Grid background */}
+          <div style={{ position: "absolute", inset: 0, backgroundImage: "linear-gradient(#0D0D14 1px, transparent 1px), linear-gradient(90deg, #0D0D14 1px, transparent 1px)", backgroundSize: "40px 40px", opacity: 0.4, pointerEvents: "none" }} />
 
-            {/* Client avatar */}
-            <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-              <Avatar nombre={profile.nombre} disc={profile.discKey} speaking={clientSpeaking} size={90} />
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "'Syne', sans-serif" }}>{profile.nombre}</div>
-                <div style={{ fontSize: 10, color: "#3A4A6A" }}>{profile.cargo} · {profile.industry.name}</div>
-              </div>
-              {clientSpeaking && (
-                <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                  {[0,1,2].map(i => <div key={i} className="dot" style={{ width: 5, height: 5, borderRadius: "50%", background: disc.color }} />)}
-                </div>
-              )}
-            </div>
-
-            {/* Self view */}
-            <div style={{
-              position: "absolute", bottom: 12, right: 12,
-              width: 64, height: 64, borderRadius: 10,
-              background: "#1A2235", border: "2px solid #2E2E3E",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 22,
-            }}>👤</div>
-
-            {/* DISC badge */}
-            <div style={{
-              position: "absolute", top: 10, left: 10,
-              background: `${disc.color}22`, border: `1px solid ${disc.color}44`,
-              borderRadius: 8, padding: "4px 10px",
-              fontSize: 10, fontWeight: 700, color: disc.color,
-            }}>
+          {/* Top badges */}
+          <div style={{ position: "relative", zIndex: 1, display: "flex", justifyContent: "space-between", padding: "14px 16px" }}>
+            <div style={{ background: `${disc.color}22`, border: `1px solid ${disc.color}55`, borderRadius: 8, padding: "5px 12px", fontSize: 10, fontWeight: 700, color: disc.color }}>
               {disc.emoji} DISC {profile.discKey}
             </div>
-
-            {/* Turn counter */}
-            <div style={{
-              position: "absolute", top: 10, right: 10,
-              background: "#111827", border: "1px solid #1E1E2E",
-              borderRadius: 8, padding: "4px 10px",
-              fontSize: 10, color: "#3A4A6A",
-            }}>
+            <div style={{ background: "#0D1420", border: "1px solid #1E2D45", borderRadius: 8, padding: "5px 12px", fontSize: 10, color: "#3A4A6A" }}>
               {turnCount} turnos
             </div>
           </div>
 
-          {/* Chat */}
-          <div ref={chatRef} style={{
-            flex: 1, overflowY: "auto", padding: "12px 14px",
-            display: "flex", flexDirection: "column", gap: 10,
-          }}>
-            {messages.map((m, i) => (
-              <div key={i} className="msg" style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
-                {m.role === "assistant" && (
-                  <div style={{ width: 28, height: 28, borderRadius: "50%", background: `${disc.color}22`, border: `1px solid ${disc.color}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0, marginRight: 8, alignSelf: "flex-end" }}>
-                    {profile.nombre[0]}
-                  </div>
-                )}
-                <div style={{
-                  maxWidth: "78%",
-                  background: m.role === "user" ? "linear-gradient(135deg, #0066FF, #0044CC)" : "#111827",
-                  color: m.role === "user" ? "#fff" : "#C8D4E8",
-                  padding: "10px 13px",
-                  borderRadius: m.role === "user" ? "14px 4px 14px 14px" : "4px 14px 14px 14px",
-                  fontSize: 12.5, lineHeight: 1.7,
-                  border: m.role === "assistant" ? `1px solid ${disc.color}22` : "none",
-                }}>
-                  {m.content}
-                </div>
-              </div>
-            ))}
-            {loading && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 28, height: 28, borderRadius: "50%", background: `${disc.color}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 }}>{profile.nombre[0]}</div>
-                <div style={{ background: "#111827", border: `1px solid ${disc.color}33`, padding: "10px 14px", borderRadius: "4px 14px 14px 14px", display: "flex", gap: 4 }}>
-                  {[0,1,2].map(i => <div key={i} className="dot" style={{ width: 6, height: 6, borderRadius: "50%", background: disc.color }} />)}
-                </div>
+          {/* Main — avatar + status */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20, position: "relative", zIndex: 1 }}>
+            <Avatar nombre={profile.nombre} disc={profile.discKey} speaking={clientSpeaking} size={130} />
+
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 800, fontFamily: "'Syne', sans-serif", color: "#F0F4FF" }}>{profile.nombre}</div>
+              <div style={{ fontSize: 11, color: "#3A4A6A", marginTop: 2 }}>{profile.cargo} · {profile.industry.name}</div>
+            </div>
+
+            {/* Status pill */}
+            <div style={{ minWidth: 160, height: 36, display: "flex", alignItems: "center", justifyContent: "center", background: "#0D1420", border: "1px solid #1E2D45", borderRadius: 20, padding: "0 16px", gap: 8 }}>
+              {loading ? (
+                <>
+                  {[0,1,2].map(i => <div key={i} className="dot" style={{ width: 7, height: 7, borderRadius: "50%", background: disc.color }} />)}
+                  <span style={{ fontSize: 11, color: "#3A4A6A" }}>Procesando...</span>
+                </>
+              ) : listening ? (
+                <>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#10B981", boxShadow: "0 0 8px #10B981", animation: "blink 1s ease infinite" }} />
+                  <span style={{ fontSize: 11, color: "#10B981", fontWeight: 600 }}>Escuchando...</span>
+                </>
+              ) : clientSpeaking ? (
+                <>
+                  {[0,1,2].map(i => <div key={i} className="dot" style={{ width: 7, height: 7, borderRadius: "50%", background: disc.color }} />)}
+                  <span style={{ fontSize: 11, color: disc.color }}>Hablando...</span>
+                </>
+              ) : (
+                <span style={{ fontSize: 11, color: "#2E3D5A" }}>En llamada</span>
+              )}
+            </div>
+
+            {/* Last user line (subtle confirmation of what was heard) */}
+            {lastUserLine && !loading && (
+              <div style={{ maxWidth: 280, textAlign: "center", fontSize: 11, color: "#1E2D45", fontStyle: "italic", lineHeight: 1.5, padding: "0 20px" }}>
+                "{lastUserLine}"
               </div>
             )}
           </div>
 
-          {/* Input */}
-          <div style={{ padding: "10px 14px 16px", borderTop: "1px solid #1A1A2E", background: "#0F1420" }}>
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-                placeholder="Escribe tu mensaje..."
-                rows={2}
-                style={{
-                  flex: 1, background: "#111827", border: "1px solid #1E1E2E",
-                  borderRadius: 10, padding: "9px 12px", color: "#DDD",
-                  fontSize: 12.5, resize: "none", lineHeight: 1.5,
-                  fontFamily: "'DM Sans', sans-serif",
-                }}
-              />
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <button className="btn" onClick={sendMessage} disabled={loading || !input.trim()}
-                  style={{
-                    background: "#0066FF", border: "none", borderRadius: 9,
-                    width: 38, height: 38, cursor: "pointer", fontSize: 16,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    opacity: loading || !input.trim() ? 0.35 : 1, transition: "all .2s",
-                  }}>↑</button>
-                <button className="btn" onClick={startListening} title="Hablar"
-                  style={{
-                    background: listening ? "#10B981" : "#1E2D45", border: `2px solid ${listening ? "#10B981" : "#2E3D5A"}`,
-                    borderRadius: 9, width: 38, height: 38, cursor: "pointer", fontSize: 16,
-                    display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s",
-                  }}>🎙️</button>
-                <button className="btn" onClick={endCall} title="Terminar llamada y evaluar"
-                  style={{
-                    background: "#EF4444", border: "none", borderRadius: 9,
-                    width: 38, height: 38, cursor: "pointer", fontSize: 16,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    transition: "all .2s",
-                  }}>⏹</button>
+          {/* Last client message */}
+          {messages.length > 0 && messages[messages.length - 1].role === "assistant" && (
+            <div style={{ position: "relative", zIndex: 1, margin: "0 16px 16px", background: "#0D1420", border: `1px solid ${disc.color}22`, borderRadius: 14, padding: "12px 16px" }}>
+              <div style={{ fontSize: 10, color: disc.color, fontWeight: 700, marginBottom: 4 }}>{profile.nombre}</div>
+              <div style={{ fontSize: 12, color: "#8899BB", lineHeight: 1.6 }}>
+                {messages[messages.length - 1].content.length > 160
+                  ? messages[messages.length - 1].content.slice(0, 160) + "..."
+                  : messages[messages.length - 1].content}
               </div>
             </div>
-            <div style={{ fontSize: 9, color: "#162035", marginTop: 5, textAlign: "center" }}>
-              Enter para enviar · ⏹ para terminar y evaluar
-            </div>
+          )}
+
+          {/* Hang-up button */}
+          <div style={{ position: "relative", zIndex: 1, display: "flex", justifyContent: "center", paddingBottom: 36 }}>
+            <button className="btn" onClick={endCall} title="Colgar y evaluar" style={{
+              width: 64, height: 64, borderRadius: "50%",
+              background: "linear-gradient(135deg, #EF4444, #DC2626)",
+              border: "none", cursor: "pointer", fontSize: 24,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              boxShadow: "0 4px 24px #EF444466", transition: "all .2s",
+            }}>📵</button>
           </div>
         </div>
       )}
