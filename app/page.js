@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
+import { selectChunks, formatChunks } from "./data/kb";
 
 // ─── DISC + INDUSTRIA DATA ───────────────────────────────────────
 const DISC_PROFILES = {
@@ -42,23 +43,35 @@ const DISC_PROFILES = {
 };
 
 const INDUSTRIES = {
-  "Retail":        { name: "Retail", size: "200 trabajadores", context: "12 sucursales, horario por turno, sistema antiguo instalado", pain: "Supervisores pierden tiempo consolidando asistencia de multiples tiendas" },
-  "Outsourcing":   { name: "Outsourcing", size: "450 trabajadores", context: "Personal en faenas de terceros, multiples clientes, rotacion alta", pain: "Dificil controlar asistencia de personal disperso en distintas empresas cliente" },
-  "Construccion":  { name: "Construccion", size: "350 trabajadores", context: "4 faenas activas, turnos rotativos 7x7, marcacion en papel", pain: "Errores en planilla por marcaciones manuales en faena" },
+  "Retail":        { name: "Retail", kbKey: "retail", size: "200 trabajadores", context: "12 sucursales, horario por turno, sistema antiguo instalado", pain: "Supervisores pierden tiempo consolidando asistencia de multiples tiendas" },
+  "Outsourcing":   { name: "Outsourcing", kbKey: "outsourcing", size: "450 trabajadores", context: "Personal en faenas de terceros, multiples clientes, rotacion alta", pain: "Dificil controlar asistencia de personal disperso en distintas empresas cliente" },
+  "Construccion":  { name: "Construccion", kbKey: "construccion", size: "350 trabajadores", context: "4 faenas activas, turnos rotativos 7x7, marcacion en papel", pain: "Errores en planilla por marcaciones manuales en faena" },
+  "Plantas Productivas": { name: "Plantas Productivas", kbKey: "plantas_productivas", size: "600 trabajadores", context: "Operacion 24/7 por turnos, convenio colectivo, calculo de haberes manual", pain: "Calculo manual de turnos, recargos y bonos del convenio genera errores y reprocesos en remuneraciones" },
+};
+
+// Marco legal por país (conocimiento general) para localizar al cliente.
+const PAISES = {
+  "Chile":    { name: "Chile", flag: "🇨🇱", context: "Te rige el Codigo del Trabajo chileno y fiscaliza la Direccion del Trabajo (DT). Te importa el libro de asistencia electronico y evitar multas de la DT. Usas modismos chilenos." },
+  "Perú":     { name: "Perú", flag: "🇵🇪", context: "Te rige la normativa del MTPE y fiscaliza SUNAFIL. Te importa el registro de control de asistencia y evitar multas de SUNAFIL. Usas modismos peruanos." },
+  "Colombia": { name: "Colombia", flag: "🇨🇴", context: "Te rige el Codigo Sustantivo del Trabajo y el Ministerio de Trabajo; aportes via PILA/UGPP. Te importa la trazabilidad de horas extra, recargos nocturnos y dominicales. Usas modismos colombianos." },
+  "México":   { name: "México", flag: "🇲🇽", context: "Te rige la LFT y la STPS (NOM-035); el SAT para temas fiscales. Te importa el control de jornada y el cumplimiento ante la STPS. Usas modismos mexicanos." },
 };
 
 const ROLES = {
   "Recursos Humanos": {
     cargos: ["Gerente de RRHH", "Subgerente de Personas", "Jefe de Administracion de Personal"],
     foco: "Le preocupa el cumplimiento legal, la precision de la planilla y el bienestar del equipo.",
+    personaSub: "rrhh",
   },
   "Operaciones": {
     cargos: ["Director de Operaciones", "Gerente de Operaciones", "Jefe de Administracion"],
     foco: "Le preocupa la eficiencia operacional, los costos y que el sistema no interrumpa la operacion.",
+    personaSub: "coo",
   },
   "Tecnologia": {
     cargos: ["Gerente de TI", "Jefe de Sistemas", "CTO"],
     foco: "Le preocupa la integracion con sistemas existentes, la seguridad de datos y la facilidad de implementacion tecnica.",
+    personaSub: null,
   },
 };
 
@@ -74,20 +87,60 @@ const ETAPAS = [
 ];
 
 // ─── SYSTEM PROMPT BUILDER ───────────────────────────────────────
+// Arma el "expediente" de realismo del cliente desde la base de conocimiento,
+// filtrado por industria y país. NO incluye soluciones ni cifras de ROI:
+// eso lo debe descubrir el vendedor.
+function buildClientKnowledge(prof) {
+  const kb = prof.industry.kbKey;
+  const pais = prof.paisKey;
+  const sec = [];
+
+  const dolores = selectChunks(kb, ["dolor"], { includeAll: false, limitPerCategory: 6, pais });
+  if (dolores.length)
+    sec.push(`DOLORES REALES DE TU OPERACION (vívelos, el vendedor debe excavarlos):\n${formatChunks(dolores)}`);
+
+  const persona = prof.rol.personaSub
+    ? selectChunks(kb, ["buyer_persona"], { includeAll: false, limitPerCategory: 1, subcategory: prof.rol.personaSub })
+    : [];
+  if (persona.length)
+    sec.push(`TU PERFIL COMO COMPRADOR (KPIs y dolores que te quitan el sueño):\n${formatChunks(persona)}`);
+
+  const part = selectChunks(kb, ["particularidad"], { includeAll: false, limitPerCategory: 2 });
+  if (part.length)
+    sec.push(`PARTICULARIDADES DE TU INDUSTRIA (quién decide y qué te importa):\n${formatChunks(part)}`);
+
+  const obj = selectChunks(kb, ["objecion"], { includeAll: false, limitPerCategory: 4, pais });
+  if (obj.length)
+    sec.push(`OBJECIONES TIPICAS QUE PODRIAS LEVANTAR (usa la objeción, NUNCA la respuesta recomendada del texto):\n${formatChunks(obj)}`);
+
+  const citas = selectChunks(kb, ["cita"], { includeAll: false, limitPerCategory: 2, pais });
+  if (citas.length)
+    sec.push(`FRASES REALES DE CLIENTES COMO TU (inspírate en su forma de hablar):\n${formatChunks(citas)}`);
+
+  return sec.join("\n\n");
+}
+
 function buildSystemPrompt(prof) {
   const disc = DISC_PROFILES[prof.discKey];
-  return `Eres ${prof.nombre}, ${prof.cargo} de una empresa de ${prof.industry.name} con ${prof.industry.size}.
+  const pais = PAISES[prof.paisKey];
+  const knowledge = buildClientKnowledge(prof);
+  return `Eres ${prof.nombre}, ${prof.cargo} de una empresa de ${prof.industry.name} con ${prof.industry.size} en ${pais.name}.
 Contexto operacional: ${prof.industry.context}.
 Dolor probable: ${prof.industry.pain}.
 Tu area y foco: ${prof.rolKey}. ${prof.rol.foco}
 
-PERSONALIDAD DISC: ${disc.name}. ${disc.tone}
+PAIS: ${pais.name}. ${pais.context}
 
+PERSONALIDAD DISC: ${disc.name}. ${disc.tone}
+${knowledge ? `\n─── CONTEXTO REAL DE TU INDUSTRIA (base de conocimiento GeoVictoria) ───\n${knowledge}\n` : ""}
 REGLAS ABSOLUTAS:
 - Habla SIEMPRE en primera persona como ${prof.nombre}
 - Responde en 2-4 oraciones maximo. Se conciso.
 - Reacciona segun tu perfil DISC en cada respuesta
+- Apóyate en los DOLORES y OBJECIONES reales de arriba, pero exprésalos como propios y de a poco: NO sueltes toda la información, el vendedor debe ganársela con buenas preguntas
+- NUNCA propongas tú la solución ni menciones cifras de ROI o ahorros: eso es trabajo del vendedor
 - Tus objeciones deben reflejar tu rol: si eres TI preguntas por integraciones, si eres RRHH por cumplimiento legal, si eres Operaciones por costo y tiempo
+- Cuando hables de lo legal, usa el marco de ${pais.name}
 - Si el vendedor no sigue el orden Sandler, reacciona con resistencia natural
 - NO rompas el personaje nunca
 - Responde solo como cliente, nunca como IA
@@ -95,12 +148,31 @@ REGLAS ABSOLUTAS:
 }
 
 // ─── EVALUATOR PROMPT ────────────────────────────────────────────
-function buildEvaluatorPrompt(transcript, profile, industry) {
+// El coach SÍ recibe el material completo (metodología, objeciones con su
+// respuesta ideal, soluciones y casos de ROI) para juzgar contra el ideal.
+function buildCoachReference(industry) {
+  const kb = industry.kbKey;
+  const sec = [];
+  const met = selectChunks(kb, ["metodologia"], { limitPerCategory: 2 });
+  if (met.length) sec.push(`MARCO SANDLER / BANT:\n${formatChunks(met)}`);
+  const trig = selectChunks(kb, ["trigger"], { limitPerCategory: 1 });
+  if (trig.length) sec.push(`PREGUNTAS DE EXCAVACION ESPERADAS:\n${formatChunks(trig)}`);
+  const obj = selectChunks(kb, ["objecion"], { includeAll: false, limitPerCategory: 6 });
+  if (obj.length) sec.push(`OBJECIONES Y SU MANEJO IDEAL:\n${formatChunks(obj)}`);
+  const sol = selectChunks(kb, ["solucion"], { includeAll: false, limitPerCategory: 5 });
+  if (sol.length) sec.push(`SOLUCIONES GEOVICTORIA QUE DEBIO ANCLAR AL DOLOR:\n${formatChunks(sol)}`);
+  const roi = selectChunks(kb, ["roi"], { limitPerCategory: 4 });
+  if (roi.length) sec.push(`CASOS DE ROI QUE PUDO CITAR COMO EVIDENCIA:\n${formatChunks(roi)}`);
+  return sec.join("\n\n");
+}
+
+function buildEvaluatorPrompt(transcript, discKey, industry) {
+  const reference = buildCoachReference(industry);
   return `Eres un coach experto en ventas Sandler. Analiza esta simulacion de venta de GeoVictoria.
 
-PERFIL DEL CLIENTE: DISC ${profile} — ${DISC_PROFILES[profile].name}
+PERFIL DEL CLIENTE: DISC ${discKey} — ${DISC_PROFILES[discKey].name}
 INDUSTRIA: ${industry.name}
-
+${reference ? `\n─── MATERIAL DE REFERENCIA (base de conocimiento GeoVictoria) ───\n${reference}\n\nUsa este material como vara: premia cuando el ejecutivo identifica los dolores reales, hace las preguntas de excavación esperadas, maneja objeciones según el ideal y ancla valor con soluciones/ROI concretos. Penaliza cuando los omite.\n` : ""}
 TRANSCRIPCION:
 ${transcript}
 
@@ -119,12 +191,12 @@ Evalua al ejecutivo en cada etapa Sandler. Responde SOLO en JSON con este format
 // ─── UTILS ───────────────────────────────────────────────────────
 function randomFrom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
-function generateProfile(discKey, industryKey, rolKey) {
+function generateProfile(discKey, industryKey, rolKey, paisKey) {
   const industry = INDUSTRIES[industryKey];
   const rol = ROLES[rolKey];
   const nombre = randomFrom(NOMBRES);
   const cargo = randomFrom(rol.cargos);
-  return { discKey, industry, industryKey, rol, rolKey, nombre, cargo };
+  return { discKey, industry, industryKey, rol, rolKey, paisKey, nombre, cargo };
 }
 
 async function callClaude(messages, system, maxTokens = 300) {
@@ -212,6 +284,7 @@ export default function App() {
   const [selectedDisc, setSelectedDisc] = useState(null);
   const [selectedIndustry, setSelectedIndustry] = useState(null);
   const [selectedRol, setSelectedRol] = useState(null);
+  const [selectedPais, setSelectedPais] = useState(null);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
@@ -289,8 +362,8 @@ export default function App() {
     speak(reply, profileSnap);
   };
 
-  const startSimulation = (discKey, industryKey, rolKey) => {
-    const p = generateProfile(discKey, industryKey, rolKey);
+  const startSimulation = (discKey, industryKey, rolKey, paisKey) => {
+    const p = generateProfile(discKey, industryKey, rolKey, paisKey);
     setProfile(p);
     setMessages([]);
     setTurnCount(0);
@@ -323,7 +396,7 @@ export default function App() {
       `${m.role === "user" ? "EJECUTIVO" : profile.nombre}: ${m.content}`
     ).join("\n\n");
 
-    const evalSys = buildEvaluatorPrompt(transcript, profile.discKey, profile.industry.name);
+    const evalSys = buildEvaluatorPrompt(transcript, profile.discKey, profile.industry);
     const raw = await callClaude(
       [{ role: "user", content: "Evalua esta simulacion." }],
       evalSys,
@@ -461,21 +534,46 @@ export default function App() {
             </div>
           </div>
 
+          {/* PAIS */}
+          <div>
+            <div style={{ fontSize: 11, color: "#4D9FFF", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".6px", marginBottom: 10 }}>
+              4 · País del cliente
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {Object.entries(PAISES).map(([k, v]) => (
+                <button key={k} onClick={() => setSelectedPais(k)} style={{
+                  background: selectedPais === k ? "#0066FF22" : "#111827",
+                  border: `2px solid ${selectedPais === k ? "#0066FF" : "#1E2D45"}`,
+                  borderRadius: 12, padding: "12px 14px", cursor: "pointer",
+                  display: "flex", alignItems: "center", gap: 10, transition: "all .2s",
+                  textAlign: "left",
+                }}>
+                  <div style={{ fontSize: 22 }}>{v.flag}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: selectedPais === k ? "#0066FF" : "#C8D4E8", fontFamily: "'Syne', sans-serif" }}>{v.name}</div>
+                  {selectedPais === k && <div style={{ marginLeft: "auto", color: "#0066FF", fontSize: 16 }}>✓</div>}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* CTA */}
-          <button className="btn"
-            onClick={() => selectedDisc && selectedIndustry && selectedRol && startSimulation(selectedDisc, selectedIndustry, selectedRol)}
-            disabled={!selectedDisc || !selectedIndustry || !selectedRol}
-            style={{
-              background: selectedDisc && selectedIndustry && selectedRol
-                ? "linear-gradient(135deg, #0066FF, #0044CC)"
-                : "#1A2235",
-              border: "none", borderRadius: 12, padding: "16px",
-              color: selectedDisc && selectedIndustry && selectedRol ? "#fff" : "#1E2D45",
-              fontSize: 14, fontWeight: 700, cursor: selectedDisc && selectedIndustry && selectedRol ? "pointer" : "not-allowed",
-              transition: "all .2s", fontFamily: "'Syne', sans-serif",
-            }}>
-            {selectedDisc && selectedIndustry && selectedRol ? "Iniciar Simulacion →" : "Selecciona los 3 parametros para continuar"}
-          </button>
+          {(() => {
+            const ready = selectedDisc && selectedIndustry && selectedRol && selectedPais;
+            return (
+              <button className="btn"
+                onClick={() => ready && startSimulation(selectedDisc, selectedIndustry, selectedRol, selectedPais)}
+                disabled={!ready}
+                style={{
+                  background: ready ? "linear-gradient(135deg, #0066FF, #0044CC)" : "#1A2235",
+                  border: "none", borderRadius: 12, padding: "16px",
+                  color: ready ? "#fff" : "#1E2D45",
+                  fontSize: 14, fontWeight: 700, cursor: ready ? "pointer" : "not-allowed",
+                  transition: "all .2s", fontFamily: "'Syne', sans-serif",
+                }}>
+                {ready ? "Iniciar Simulacion →" : "Selecciona los 4 parametros para continuar"}
+              </button>
+            );
+          })()}
 
           <div style={{ fontSize: 10, color: "#162035", textAlign: "center", paddingBottom: 8 }}>
             GeoVictoria · Entrenamiento Comercial · Sandler + DISC
@@ -489,7 +587,7 @@ export default function App() {
           <div style={{ textAlign: "center", paddingTop: 12 }}>
             <div style={{ fontSize: 11, color: "#4D9FFF", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".6px", marginBottom: 6 }}>Tu prospecto de hoy</div>
             <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 22, fontWeight: 800 }}>{profile.nombre}</div>
-            <div style={{ fontSize: 13, color: "#4A5A7A" }}>{profile.cargo} · {profile.industry.name}</div>
+            <div style={{ fontSize: 13, color: "#4A5A7A" }}>{profile.cargo} · {profile.industry.name} · {PAISES[profile.paisKey].flag} {PAISES[profile.paisKey].name}</div>
           </div>
 
           {/* DISC Badge */}
@@ -583,7 +681,7 @@ export default function App() {
 
             <div style={{ textAlign: "center" }}>
               <div style={{ fontSize: 18, fontWeight: 800, fontFamily: "'Syne', sans-serif", color: "#F0F4FF" }}>{profile.nombre}</div>
-              <div style={{ fontSize: 11, color: "#3A4A6A", marginTop: 2 }}>{profile.cargo} · {profile.industry.name}</div>
+              <div style={{ fontSize: 11, color: "#3A4A6A", marginTop: 2 }}>{profile.cargo} · {profile.industry.name} · {PAISES[profile.paisKey].flag}</div>
             </div>
 
             {/* Status pill */}
@@ -729,14 +827,14 @@ export default function App() {
           )}
 
           <div style={{ display: "flex", gap: 10 }}>
-            <button className="btn" onClick={() => { setPhase("lobby"); setSelectedDisc(null); setSelectedIndustry(null); setSelectedRol(null); }} style={{
+            <button className="btn" onClick={() => { setPhase("lobby"); setSelectedDisc(null); setSelectedIndustry(null); setSelectedRol(null); setSelectedPais(null); }} style={{
               flex: 1, background: "linear-gradient(135deg, #0066FF, #0044CC)",
               border: "none", borderRadius: 12, padding: "14px",
               color: "#fff", fontSize: 13, fontWeight: 700,
               cursor: "pointer", transition: "all .2s",
               fontFamily: "'Syne', sans-serif",
             }}>Nueva simulacion →</button>
-            <button className="btn" onClick={() => { setPhase("lobby"); setSelectedDisc(null); setSelectedIndustry(null); setSelectedRol(null); setProfile(null); setMessages([]); setEvaluation(null); setTurnCount(0); }} style={{
+            <button className="btn" onClick={() => { setPhase("lobby"); setSelectedDisc(null); setSelectedIndustry(null); setSelectedRol(null); setSelectedPais(null); setProfile(null); setMessages([]); setEvaluation(null); setTurnCount(0); }} style={{
               width: 48, background: "#111827", border: "1px solid #1E1E2E",
               borderRadius: 12, cursor: "pointer", fontSize: 18, transition: "all .2s",
             }}>🏠</button>
