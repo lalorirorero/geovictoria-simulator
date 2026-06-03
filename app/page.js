@@ -51,10 +51,13 @@ const INDUSTRIES = {
 
 // Marco legal por país (conocimiento general) para localizar al cliente.
 const PAISES = {
-  "Chile":    { name: "Chile", flag: "🇨🇱", context: "Te rige el Codigo del Trabajo chileno y fiscaliza la Direccion del Trabajo (DT). Te importa el libro de asistencia electronico y evitar multas de la DT. Usas modismos chilenos." },
-  "Perú":     { name: "Perú", flag: "🇵🇪", context: "Te rige la normativa del MTPE y fiscaliza SUNAFIL. Te importa el registro de control de asistencia y evitar multas de SUNAFIL. Usas modismos peruanos." },
-  "Colombia": { name: "Colombia", flag: "🇨🇴", context: "Te rige el Codigo Sustantivo del Trabajo y el Ministerio de Trabajo; aportes via PILA/UGPP. Te importa la trazabilidad de horas extra, recargos nocturnos y dominicales. Usas modismos colombianos." },
-  "México":   { name: "México", flag: "🇲🇽", context: "Te rige la LFT y la STPS (NOM-035); el SAT para temas fiscales. Te importa el control de jornada y el cumplimiento ante la STPS. Usas modismos mexicanos." },
+  "Chile":     { name: "Chile", flag: "🇨🇱", lang: "es-CL", context: "Te rige el Codigo del Trabajo chileno y fiscaliza la Direccion del Trabajo (DT). Te importa el libro de asistencia electronico y evitar multas de la DT. Usas modismos chilenos." },
+  "Perú":      { name: "Perú", flag: "🇵🇪", lang: "es-PE", context: "Te rige la normativa del MTPE y fiscaliza SUNAFIL. Te importa el registro de control de asistencia y evitar multas de SUNAFIL. Usas modismos peruanos." },
+  "Colombia":  { name: "Colombia", flag: "🇨🇴", lang: "es-CO", context: "Te rige el Codigo Sustantivo del Trabajo y el Ministerio de Trabajo; aportes via PILA/UGPP. Te importa la trazabilidad de horas extra, recargos nocturnos y dominicales. Usas modismos colombianos." },
+  "México":    { name: "México", flag: "🇲🇽", lang: "es-MX", context: "Te rige la LFT y la STPS (NOM-035); el SAT para temas fiscales. Te importa el control de jornada y el cumplimiento ante la STPS. Usas modismos mexicanos." },
+  "Argentina": { name: "Argentina", flag: "🇦🇷", lang: "es-AR", context: "Te rige la Ley de Contrato de Trabajo y fiscaliza el Ministerio de Trabajo; aportes a la AFIP. Te importa el registro horario y evitar multas. Usas modismos argentinos (voseo)." },
+  "Panamá":    { name: "Panamá", flag: "🇵🇦", lang: "es-PA", context: "Te rige el Codigo de Trabajo y fiscaliza el MITRADEL. Te importa el control de planillas y el cumplimiento ante el MITRADEL. Usas modismos panameños." },
+  "Brasil":    { name: "Brasil", flag: "🇧🇷", lang: "pt-BR", idioma: "pt", context: "Você é do Brasil. Você se rege pela CLT (Consolidação das Leis do Trabalho) e pela fiscalização do Ministério do Trabalho; usa eSocial e ponto eletrônico (Portaria 671). Você se preocupa com o registro de ponto e em evitar multas. Use gírias e expressões brasileiras." },
 };
 
 const ROLES = {
@@ -124,7 +127,11 @@ function buildSystemPrompt(prof) {
   const disc = DISC_PROFILES[prof.discKey];
   const pais = PAISES[prof.paisKey];
   const knowledge = buildClientKnowledge(prof);
-  return `Eres ${prof.nombre}, ${prof.cargo} de una empresa de ${prof.industry.name} con ${prof.industry.size} en ${pais.name}.
+  const isPt = pais.lang === "pt-BR";
+  const idiomaRule = isPt
+    ? "- IDIOMA: Responde SIEMPRE en portugués de Brasil (pt-BR), nunca en español, aunque el contexto de abajo esté en español. Eres brasileño y hablas como tal."
+    : `- Cuando hables de lo legal, usa el marco de ${pais.name}`;
+  return `Eres ${prof.nombre}, ${prof.cargo} de una empresa de ${prof.industry.name} con ${prof.industry.size} en ${pais.name}.${isPt ? " IMPORTANTE: hablas y respondes SIEMPRE en portugués de Brasil." : ""}
 Contexto operacional: ${prof.industry.context}.
 Dolor probable: ${prof.industry.pain}.
 Tu area y foco: ${prof.rolKey}. ${prof.rol.foco}
@@ -140,7 +147,7 @@ REGLAS ABSOLUTAS:
 - Apóyate en los DOLORES y OBJECIONES reales de arriba, pero exprésalos como propios y de a poco: NO sueltes toda la información, el vendedor debe ganársela con buenas preguntas
 - NUNCA propongas tú la solución ni menciones cifras de ROI o ahorros: eso es trabajo del vendedor
 - Tus objeciones deben reflejar tu rol: si eres TI preguntas por integraciones, si eres RRHH por cumplimiento legal, si eres Operaciones por costo y tiempo
-- Cuando hables de lo legal, usa el marco de ${pais.name}
+${idiomaRule}
 - Si el vendedor no sigue el orden Sandler, reacciona con resistencia natural
 - NO rompas el personaje nunca
 - Responde solo como cliente, nunca como IA
@@ -166,13 +173,17 @@ function buildCoachReference(industry) {
   return sec.join("\n\n");
 }
 
-function buildEvaluatorPrompt(transcript, discKey, industry) {
+function buildEvaluatorPrompt(transcript, discKey, industry, paisKey) {
   const reference = buildCoachReference(industry);
+  const pais = PAISES[paisKey];
+  const idiomaNota = pais && pais.lang === "pt-BR"
+    ? "\nIMPORTANTE: escribe TODOS los comentarios (campos 'comment' y 'general') en portugués de Brasil.\n"
+    : "";
   return `Eres un coach experto en ventas Sandler. Analiza esta simulacion de venta de GeoVictoria.
 
 PERFIL DEL CLIENTE: DISC ${discKey} — ${DISC_PROFILES[discKey].name}
-INDUSTRIA: ${industry.name}
-${reference ? `\n─── MATERIAL DE REFERENCIA (base de conocimiento GeoVictoria) ───\n${reference}\n\nUsa este material como vara: premia cuando el ejecutivo identifica los dolores reales, hace las preguntas de excavación esperadas, maneja objeciones según el ideal y ancla valor con soluciones/ROI concretos. Penaliza cuando los omite.\n` : ""}
+INDUSTRIA: ${industry.name}${pais ? ` · PAIS: ${pais.name}` : ""}
+${reference ? `\n─── MATERIAL DE REFERENCIA (base de conocimiento GeoVictoria) ───\n${reference}\n\nUsa este material como vara: premia cuando el ejecutivo identifica los dolores reales, hace las preguntas de excavación esperadas, maneja objeciones según el ideal y ancla valor con soluciones/ROI concretos. Penaliza cuando los omite.\n` : ""}${idiomaNota}
 TRANSCRIPCION:
 ${transcript}
 
@@ -210,14 +221,16 @@ async function callClaude(messages, system, maxTokens = 300) {
 }
 
 // ─── VOICE ───────────────────────────────────────────────────────
+// Voces ElevenLabs por idioma: español (latino) y portugués (Brasil).
 const VOICES = {
-  male:   { D: "pNInz6obpgDQGcFmaJgB", I: "TX3LPaxmHKxFdv7VOQHJ", S: "nPczCjzI2devNBz1zQrb", C: "onwK4e9ZLuTAKqWW03F9" },
-  female: { D: "Xb7hH8MSUJpSbSDYk0k2", I: "cgSgspJ2msm6clMkppW",  S: "EXAVITQu4vr4xnSDxMaL", C: "XrExE9yKIg1WjnnlVkGG" },
+  es: { male: "uPc5TJmLHicJAPs7qpif", female: "nTkjq09AuYgsNR8E4sDe" },
+  pt: { male: "aU2vcrnwi348Gnc2Y1si", female: "mPDAoQyGzxBSkE0OAOKw" },
 };
 const FEMALE_NAMES = ["Ana", "Patricia", "Monica"];
-function getVoiceId(discKey, nombre) {
+function getVoiceId(nombre, paisKey) {
   const gender = FEMALE_NAMES.some(n => nombre.startsWith(n)) ? "female" : "male";
-  return VOICES[gender][discKey];
+  const idioma = PAISES[paisKey]?.lang === "pt-BR" ? "pt" : "es";
+  return VOICES[idioma][gender];
 }
 
 // ─── AVATAR ──────────────────────────────────────────────────────
@@ -286,9 +299,40 @@ export default function App() {
   const [selectedRol, setSelectedRol] = useState(null);
   const [selectedPais, setSelectedPais] = useState(null);
 
+  const [authed, setAuthed] = useState(false);
+  const [pwInput, setPwInput] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { loadingRef.current = loading; }, [loading]);
+  useEffect(() => {
+    try { if (sessionStorage.getItem("gv_auth") === "1") setAuthed(true); } catch {}
+  }, []);
+
+  const tryLogin = async () => {
+    setAuthError("");
+    setAuthLoading(true);
+    try {
+      const res = await fetch("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pwInput }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        try { sessionStorage.setItem("gv_auth", "1"); } catch {}
+        setAuthed(true);
+        setPwInput("");
+      } else {
+        setAuthError("Contraseña incorrecta.");
+      }
+    } catch {
+      setAuthError("Error de conexión. Intenta de nuevo.");
+    }
+    setAuthLoading(false);
+  };
 
   const stopListening = () => {
     if (recRef.current) { try { recRef.current.abort(); } catch {} recRef.current = null; }
@@ -301,7 +345,7 @@ export default function App() {
     if (!SR) return;
     stopListening();
     const rec = new SR();
-    rec.lang = "es-CL";
+    rec.lang = (profileSnap && PAISES[profileSnap.paisKey] && PAISES[profileSnap.paisKey].lang) || "es-CL";
     rec.continuous = false;
     rec.interimResults = false;
     rec.onstart = () => setListening(true);
@@ -318,7 +362,7 @@ export default function App() {
   const speak = async (text, profileSnap) => {
     setClientSpeaking(true);
     try {
-      const voiceId = getVoiceId(profileSnap.discKey, profileSnap.nombre);
+      const voiceId = getVoiceId(profileSnap.nombre, profileSnap.paisKey);
       const res = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -376,10 +420,10 @@ export default function App() {
     setLoading(true);
     loadingRef.current = true;
     const sys = buildSystemPrompt(profileSnap);
-    const opening = await callClaude(
-      [{ role: "user", content: "Hola, gracias por tomar la llamada." }],
-      sys
-    );
+    const seed = PAISES[profileSnap.paisKey]?.lang === "pt-BR"
+      ? "Olá, obrigado por atender a ligação."
+      : "Hola, gracias por tomar la llamada.";
+    const opening = await callClaude([{ role: "user", content: seed }], sys);
     const initial = [{ role: "assistant", content: opening }];
     setMessages(initial);
     messagesRef.current = initial;
@@ -396,7 +440,7 @@ export default function App() {
       `${m.role === "user" ? "EJECUTIVO" : profile.nombre}: ${m.content}`
     ).join("\n\n");
 
-    const evalSys = buildEvaluatorPrompt(transcript, profile.discKey, profile.industry);
+    const evalSys = buildEvaluatorPrompt(transcript, profile.discKey, profile.industry, profile.paisKey);
     const raw = await callClaude(
       [{ role: "user", content: "Evalua esta simulacion." }],
       evalSys,
@@ -421,6 +465,56 @@ export default function App() {
   };
 
   const disc = profile ? DISC_PROFILES[profile.discKey] : null;
+
+  // ── Pantalla de seguridad (login) ──
+  if (!authed) {
+    return (
+      <div style={{
+        minHeight: "100vh", background: "#0B0F1A", color: "#F0F4FF",
+        fontFamily: "'DM Sans', sans-serif",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        padding: "24px 20px", gap: 18,
+      }}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Syne:wght@700;800&display=swap'); *{box-sizing:border-box;margin:0;padding:0;} input:focus{outline:none;}`}</style>
+        <div style={{ fontSize: 40 }}>🔒</div>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 22, fontWeight: 800 }}>Simulador de Ventas</div>
+          <div style={{ fontSize: 12, color: "#3A4A6A", marginTop: 4 }}>Ingresa la contraseña para continuar</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%", maxWidth: 320 }}>
+          <input
+            type="password"
+            value={pwInput}
+            onChange={(e) => setPwInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && pwInput && !authLoading) tryLogin(); }}
+            placeholder="Contraseña"
+            autoFocus
+            style={{
+              background: "#111827", border: `2px solid ${authError ? "#EF4444" : "#1E2D45"}`,
+              borderRadius: 12, padding: "14px 16px", color: "#F0F4FF", fontSize: 14,
+              fontFamily: "'DM Sans', sans-serif",
+            }}
+          />
+          {authError && <div style={{ fontSize: 12, color: "#EF4444" }}>{authError}</div>}
+          <button
+            onClick={() => pwInput && !authLoading && tryLogin()}
+            disabled={!pwInput || authLoading}
+            style={{
+              background: pwInput && !authLoading ? "linear-gradient(135deg, #0066FF, #0044CC)" : "#1A2235",
+              border: "none", borderRadius: 12, padding: "14px",
+              color: pwInput && !authLoading ? "#fff" : "#1E2D45",
+              fontSize: 14, fontWeight: 700, cursor: pwInput && !authLoading ? "pointer" : "not-allowed",
+              fontFamily: "'Syne', sans-serif",
+            }}>
+            {authLoading ? "Verificando..." : "Ingresar"}
+          </button>
+        </div>
+        <div style={{ fontSize: 10, color: "#162035", textAlign: "center" }}>
+          GeoVictoria · Entrenamiento Comercial
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{
