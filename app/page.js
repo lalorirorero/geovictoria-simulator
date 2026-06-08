@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { selectChunks, formatChunks } from "./data/kb";
 import { initZoho, insertRoleplayRecord, closeWidget, isZohoSource, isEmbedded } from "./lib/zoho";
 import {
-  INDUSTRY_MAP, ROL_MAP, DEFAULT_DIFICULTAD,
+  DEFAULT_DIFICULTAD,
   STAGES, deriveStageView, buildRoleplayApiData,
 } from "./lib/zohoRoleplay";
 
@@ -557,12 +557,13 @@ export default function App() {
       const empleados = parseInt(String(prof.industry.size).replace(/\D/g, ""), 10);
       const scenario = {
         recordName: `${prof.nombre} · ${prof.cargo} · ${prof.industry.name}`,
-        industria: INDUSTRY_MAP[prof.industryKey] || null,
-        rol: ROL_MAP[prof.rolKey] || null,
+        disc: prof.discKey,
+        industria: prof.industry.name,
+        rol: prof.rolKey,
         pais: pais ? pais.name : prof.paisKey,
         cargo: prof.cargo,
+        nombre: prof.nombre,
         empleados: Number.isFinite(empleados) ? empleados : null,
-        nombreEmpresa: null,
         dificultad: DEFAULT_DIFICULTAD,
       };
       const apiData = buildRoleplayApiData({ scenario, evaluation: parsed, user: zohoUserRef.current, transcript: transcriptRef.current });

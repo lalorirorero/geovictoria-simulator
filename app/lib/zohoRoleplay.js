@@ -1,48 +1,29 @@
-// ─── Mapeo simulador → modulo Rolplay_Academia (Primera Reunion) ──
-// Traduce el escenario elegido en el widget y la evaluacion del coach
-// a los campos exactos del modulo de Zoho. La rubrica usada es la de
-// "Primera Reunion" (descubrimiento Sandler), que alimenta la formula
-// Nota_Final_Primera_Reuni_n via los campos booleanos de cada criterio.
-
-// Industria del simulador (4 opciones) → picklist Industria (22 opciones).
-export const INDUSTRY_MAP = {
-  "Retail": "17. Retail Enterprise",
-  "Outsourcing": "13. Outsourcing General",
-  "Construccion": "3. Construcción",
-  "Plantas Productivas": "15. Planta Productiva",
-};
-
-// Rol del prospecto → picklist Rol_dentro_de_la_empresa.
-export const ROL_MAP = {
-  "Recursos Humanos": "Gerente de Recursos Humanos",
-  "Operaciones": "Encargado de Operaciones",
-  "Tecnologia": "Jefe de Tecnología (TI)",
-};
+// ─── Mapeo simulador → modulo Rolplay_Academia (campos propios RP_) ──
+// Esta iniciativa (roleplay desde la app web) escribe en campos EXCLUSIVOS
+// con prefijo RP_, creados solo para este flujo, para no cruzarse con los
+// campos que llena Dapta. La rubrica es la de "Primera Reunion"
+// (descubrimiento Sandler): 12 criterios sí/no + comentario, mas la nota
+// final como numero (snapshot que escribe la app).
 
 // Valor por defecto de dificultad (el simulador no la pide hoy).
 export const DEFAULT_DIFICULTAD = "Medio: prospecto neutral con algunas objeciones";
 
-// Etiqueta del agente: ancla el registro a la rubrica de Primera Reunion.
-export const AGENTE_DAPTA = "Victoria - Entrenamiento Primera Reunión";
-
-// ─── Los 12 criterios de Primera Reunion ────────────────────────
-// Cada criterio tiene un campo booleano (cumplio si/no) y un campo de
-// texto pareja (comentario, 255). El sufijo "1" del API name varia por
-// campo: estos valores fueron verificados contra la metadata del modulo.
-// `group` agrupa los criterios en las 5 etapas Sandler para la UI.
+// ─── Los 12 criterios de Primera Reunion → campos propios RP_ ─────
+// Cada criterio tiene un campo booleano (cumplio si/no) y un campo de texto
+// pareja (comentario). `group` agrupa en las 5 etapas Sandler para la UI.
 export const CRITERIA = [
-  { key: "ufc_contrato",            group: "ufc",      label: "Estableció el contrato previo (UFC)",       bool: "Se_estableci_el_contrato_previo_con_el_prospecto",  text: "Se_estableci_el_contrato_previo_con_el_prospecto1" },
-  { key: "ufc_roles",               group: "ufc",      label: "Presentó roles y empresas",                 bool: "Se_realiz_la_presentaci_n_de_roles_y_empresas_de",  text: "Se_realiz_la_presentaci_n_de_roles_y_empresas_de1" },
-  { key: "apertura_clara",          group: "ufc",      label: "Inició la llamada de forma clara y rápida",  bool: "El_SDR_inicia_la_llamada_de_manera_clara_y_r_pid",  text: "El_SDR_inicia_la_llamada_de_manera_clara_y_r_pida" },
-  { key: "apertura_saludo",         group: "ufc",      label: "Ajustó el saludo / la introducción",         bool: "El_SDR_ajusta_el_saludo_o_la_introducci_n1",        text: "El_SDR_ajusta_el_saludo_o_la_introducci_n" },
-  { key: "modelo_empleados",        group: "modelo",   label: "Obtuvo la cantidad de empleados",            bool: "Se_obtuvo_informaci_n_sobre_la_cantidad_de_emplea", text: "Se_obtuvo_informaci_n_sobre_la_cantidad_de_emplea1" },
-  { key: "modelo_sistema",          group: "modelo",   label: "Identificó el sistema actual de marcaje",    bool: "Se_identific_el_sistema_actual_de_control_de_asi",  text: "Se_identific_el_sistema_actual_de_control_de_asi1" },
-  { key: "pain_dolores",            group: "pain",     label: "Exploró claramente los dolores",             bool: "Se_exploraron_claramente_los_dolores_problemas1",   text: "Se_exploraron_claramente_los_dolores_problemas" },
-  { key: "pain_suenos",             group: "pain",     label: "Discutió sueños / deseos del prospecto",     bool: "Se_discutieron_los_sue_os_o_deseos_del_prospecto1", text: "Se_discutieron_los_sue_os_o_deseos_del_prospecto" },
-  { key: "budget_presupuesto",      group: "budget",   label: "Exploró el presupuesto",                     bool: "Se_explor_si_existe_un_presupuesto_asignado_o_un1", text: "Se_explor_si_existe_un_presupuesto_asignado_o_un" },
-  { key: "decision_proceso",        group: "decision", label: "Identificó los pasos del proceso de compra", bool: "Se_identificaron_los_pasos_del_proceso_de_compra1", text: "Se_identificaron_los_pasos_del_proceso_de_compra" },
-  { key: "decision_plazos",         group: "decision", label: "Discutió los plazos de decisión",            bool: "Se_discutieron_los_plazos_del_prospecto_para_toma1", text: "Se_discutieron_los_plazos_del_prospecto_para_toma" },
-  { key: "decision_siguiente_paso", group: "decision", label: "Definió un siguiente paso claro",            bool: "Se_defini_un_siguiente_paso_claro_y_concreto_co",   text: "Se_defini_un_siguiente_paso_claro_y_concreto_co1" },
+  { key: "ufc_contrato",            group: "ufc",      label: "Estableció el contrato previo (UFC)",       bool: "RP_UFC_Contrato",        text: "RP_UFC_Contrato_Det" },
+  { key: "ufc_roles",               group: "ufc",      label: "Presentó roles y empresas",                 bool: "RP_UFC_Roles",           text: "RP_UFC_Roles_Det" },
+  { key: "apertura_clara",          group: "ufc",      label: "Inició la llamada de forma clara y rápida",  bool: "RP_Apertura_Clara",      text: "RP_Apertura_Clara_Det" },
+  { key: "apertura_saludo",         group: "ufc",      label: "Ajustó el saludo / la introducción",         bool: "RP_Apertura_Saludo",     text: "RP_Apertura_Saludo_Det" },
+  { key: "modelo_empleados",        group: "modelo",   label: "Obtuvo la cantidad de empleados",            bool: "RP_Modelo_Empleados",    text: "RP_Modelo_Empleados_Det" },
+  { key: "modelo_sistema",          group: "modelo",   label: "Identificó el sistema actual de marcaje",    bool: "RP_Modelo_Sistema",      text: "RP_Modelo_Sistema_Det" },
+  { key: "pain_dolores",            group: "pain",     label: "Exploró claramente los dolores",             bool: "RP_Pain_Dolores",        text: "RP_Pain_Dolores_Det" },
+  { key: "pain_suenos",             group: "pain",     label: "Discutió sueños / deseos del prospecto",     bool: "RP_Pain_Suenos",         text: "RP_Pain_Suenos_Det" },
+  { key: "budget_presupuesto",      group: "budget",   label: "Exploró el presupuesto",                     bool: "RP_Budget_Presupuesto",  text: "RP_Budget_Presup_Det" },
+  { key: "decision_proceso",        group: "decision", label: "Identificó los pasos del proceso de compra", bool: "RP_Decision_Proceso",    text: "RP_Decision_Proceso_Det" },
+  { key: "decision_plazos",         group: "decision", label: "Discutió los plazos de decisión",            bool: "RP_Decision_Plazos",     text: "RP_Decision_Plazos_Det" },
+  { key: "decision_siguiente_paso", group: "decision", label: "Definió un siguiente paso claro",            bool: "RP_Decision_Sgte_Paso",  text: "RP_Decision_Paso_Det" },
 ];
 
 // Etapas Sandler para la UI de resultados (deriva de los criterios).
@@ -61,7 +42,7 @@ function clip(v, max) {
 }
 
 // Deriva el puntaje 0-10 por etapa a partir de los criterios cumplidos,
-// para que la UI de resultados muestre las 5 etapas como antes.
+// para que la UI de resultados muestre las 5 etapas.
 export function deriveStageView(evaluation) {
   const crit = (evaluation && evaluation.criterios) || {};
   const view = {};
@@ -82,32 +63,44 @@ export function deriveStageView(evaluation) {
   return view;
 }
 
-// Construye el APIData para insertRecord en Rolplay_Academia.
-// scenario: { recordName, industria, rol, pais, cargo, empleados,
-//             nombreEmpresa, dificultad }
-// evaluation: salida JSON del coach (criterios + feedback)
-// user: usuario actual de Zoho ({ id, ... }) → queda como Owner
-// transcript: transcripcion completa de la conversacion (opcional)
+// Nota final 0-10 (snapshot): mismo calculo que el "Puntaje general" de la UI
+// (promedio de las 5 etapas + adaptacion DISC).
+export function computeFinalScore(evaluation) {
+  const view = deriveStageView(evaluation);
+  const stageScores = STAGES.map((s) => view[s.key].score);
+  const disc = (evaluation && evaluation.disc_adaptation && evaluation.disc_adaptation.score) || 0;
+  const all = [...stageScores, disc];
+  return Math.round(all.reduce((a, b) => a + b, 0) / all.length);
+}
+
+// Construye el APIData para insertRecord en Rolplay_Academia usando SOLO los
+// campos propios RP_ (mas Name, Owner y la transcripcion). No toca los campos
+// de la rubrica de Dapta ni la formula Nota_Final_Primera_Reuni_n.
+// scenario: { recordName, disc, industria, rol, pais, cargo, nombre,
+//             empleados, dificultad }
 export function buildRoleplayApiData({ scenario, evaluation, user, transcript }) {
   const data = {
     Name: clip(scenario.recordName, 120),
-    Estado: "Evaluado",
-    Agente_Dapta: AGENTE_DAPTA,
-    Iniciar_Rolplay: false,
-    Fecha_Evaluaci_n: new Date().toISOString().slice(0, 10),
+    RP_Fecha_Evaluacion: new Date().toISOString().slice(0, 10),
   };
 
   // Dueño = usuario logueado en Zoho.
   if (user && user.id) data.Owner = { id: String(user.id) };
 
-  // ── Escenario ──
-  if (scenario.industria) data.Industria = scenario.industria;
-  if (scenario.rol) data.Rol_dentro_de_la_empresa = scenario.rol;
-  if (scenario.pais) data.Pa_s = clip(scenario.pais, 100);
-  if (scenario.cargo) data.Cargo = clip(scenario.cargo, 255);
-  if (scenario.nombreEmpresa) data.Nombre_Empresa = clip(scenario.nombreEmpresa, 255);
-  if (Number.isFinite(scenario.empleados)) data.N_mero_Empleados = scenario.empleados;
-  data.Nivel_de_dificultad = scenario.dificultad || DEFAULT_DIFICULTAD;
+  // ── Escenario (campos propios) ──
+  if (scenario.disc) data.RP_DISC = scenario.disc;
+  if (scenario.industria) data.RP_Industria = scenario.industria;
+  if (scenario.rol) data.RP_Rol = scenario.rol;
+  if (scenario.pais) data.RP_Pais = clip(scenario.pais, 100);
+  if (scenario.cargo) data.RP_Cargo = clip(scenario.cargo, 255);
+  if (scenario.nombre) data.RP_Nombre_Cliente = clip(scenario.nombre, 255);
+  if (Number.isFinite(scenario.empleados)) data.RP_Num_Empleados = scenario.empleados;
+  data.RP_Dificultad = clip(scenario.dificultad || DEFAULT_DIFICULTAD, 255);
+
+  // ── Notas (numero snapshot) ──
+  data.RP_Nota_Final = computeFinalScore(evaluation);
+  const discScore = evaluation && evaluation.disc_adaptation && evaluation.disc_adaptation.score;
+  if (Number.isFinite(discScore)) data.RP_Nota_DISC = discScore;
 
   // ── Criterios (booleano + comentario) ──
   const crit = (evaluation && evaluation.criterios) || {};
@@ -121,14 +114,11 @@ export function buildRoleplayApiData({ scenario, evaluation, user, transcript })
 
   // ── Feedback ──
   const pf = clip(evaluation && evaluation.puntos_fuertes, 2000);
-  if (pf) data.Puntos_fuertes_detectados = pf;
+  if (pf) data.RP_Puntos_Fuertes = pf;
   const op = clip(evaluation && evaluation.oportunidades, 2000);
-  if (op) data.Oportunidades_de_mejora = op;
-  const rec = clip(
-    (evaluation && (evaluation.recomendacion || evaluation.general)) || "",
-    2000
-  );
-  if (rec) data.Recomendaci_n_pr_ctica_para_tu_pr_ximo_roleplay = rec;
+  if (op) data.RP_Oportunidades = op;
+  const rec = clip((evaluation && (evaluation.recomendacion || evaluation.general)) || "", 2000);
+  if (rec) data.RP_Recomendacion = rec;
 
   // ── Transcripcion completa (textarea large, 32k) ──
   const tr = clip(transcript, 32000);

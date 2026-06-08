@@ -130,64 +130,81 @@ que funcione dentro del iframe del widget:
 
 ## Mapeo de datos (qué se guarda en el registro)
 
-Al terminar, se crea un registro con `Estado = "Evaluado"`,
-`Agente_Dapta = "Victoria - Entrenamiento Primera Reunión"`,
-`Owner = usuario logueado`, más:
+> **Campos exclusivos:** este flujo escribe SOLO en campos propios con prefijo
+> **`RP_`** (creados para esta iniciativa) + `Name`, `Owner` y la transcripción.
+> **No toca** los campos de la rúbrica de Dapta ni la fórmula
+> `Nota_Final_Primera_Reuni_n`, así no se cruzan los dos flujos.
+
+Al terminar, se crea un registro con `Owner = usuario logueado`,
+`Name = {nombre} · {cargo} · {industria}` y `RP_Fecha_Evaluacion = hoy`, más:
 
 ### Escenario (de lo elegido en el widget)
-| Campo del módulo | Origen en el widget |
+| Campo `RP_` | Tipo | Origen |
+|---|---|---|
+| `RP_DISC` | picklist | Perfil DISC del cliente (D/I/S/C) |
+| `RP_Industria` | picklist | Industria elegida |
+| `RP_Rol` | picklist | Rol del prospecto |
+| `RP_Pais` | picklist | País elegido |
+| `RP_Cargo` | texto | Cargo generado del prospecto |
+| `RP_Nombre_Cliente` | texto | Nombre del cliente simulado |
+| `RP_Num_Empleados` | entero | Dotación de la industria |
+| `RP_Dificultad` | texto | Nivel de dificultad |
+
+### Notas (número, snapshot que escribe la app)
+| Campo `RP_` | Origen |
 |---|---|
-| `Name` | `{nombre} · {cargo} · {industria}` |
-| `Industria` | Industria → picklist (Retail→Retail Enterprise, Outsourcing→Outsourcing General, Construccion→Construcción, Plantas Productivas→Planta Productiva) |
-| `Rol_dentro_de_la_empresa` | Rol (RRHH/Operaciones/TI) |
-| `Pa_s` | País elegido |
-| `Cargo` | Cargo generado del prospecto |
-| `N_mero_Empleados` | Dotación de la industria |
-| `Nivel_de_dificultad` | `Medio: prospecto neutral con algunas objeciones` (por defecto) |
+| `RP_Nota_Final` | Puntaje general 0-10 (promedio de las 5 etapas + DISC) |
+| `RP_Nota_DISC` | Puntaje de adaptación al perfil DISC (0-10) |
 
 ### Evaluación — 12 criterios de Primera Reunión
 Cada criterio escribe un **booleano** (cumplió sí/no) y su **comentario**:
 
-| Criterio (booleano / comentario) | Etapa |
-|---|---|
-| `Se_estableci_el_contrato_previo_con_el_prospecto` / `…1` | UFC |
-| `Se_realiz_la_presentaci_n_de_roles_y_empresas_de` / `…1` | UFC |
-| `El_SDR_inicia_la_llamada_de_manera_clara_y_r_pid` / `…a` | UFC |
-| `El_SDR_ajusta_el_saludo_o_la_introducci_n1` / `…` | UFC |
-| `Se_obtuvo_informaci_n_sobre_la_cantidad_de_emplea` / `…1` | Modelo |
-| `Se_identific_el_sistema_actual_de_control_de_asi` / `…1` | Modelo |
-| `Se_exploraron_claramente_los_dolores_problemas1` / `…` | Pain |
-| `Se_discutieron_los_sue_os_o_deseos_del_prospecto1` / `…` | Pain |
-| `Se_explor_si_existe_un_presupuesto_asignado_o_un1` / `…` | Budget |
-| `Se_identificaron_los_pasos_del_proceso_de_compra1` / `…` | Decisión |
-| `Se_discutieron_los_plazos_del_prospecto_para_toma1` / `…` | Decisión |
-| `Se_defini_un_siguiente_paso_claro_y_concreto_co` / `…1` | Decisión |
+| Etapa | Booleano `RP_` | Comentario `RP_` |
+|---|---|---|
+| UFC | `RP_UFC_Contrato` | `RP_UFC_Contrato_Det` |
+| UFC | `RP_UFC_Roles` | `RP_UFC_Roles_Det` |
+| UFC | `RP_Apertura_Clara` | `RP_Apertura_Clara_Det` |
+| UFC | `RP_Apertura_Saludo` | `RP_Apertura_Saludo_Det` |
+| Modelo | `RP_Modelo_Empleados` | `RP_Modelo_Empleados_Det` |
+| Modelo | `RP_Modelo_Sistema` | `RP_Modelo_Sistema_Det` |
+| Pain | `RP_Pain_Dolores` | `RP_Pain_Dolores_Det` |
+| Pain | `RP_Pain_Suenos` | `RP_Pain_Suenos_Det` |
+| Budget | `RP_Budget_Presupuesto` | `RP_Budget_Presup_Det` |
+| Decisión | `RP_Decision_Proceso` | `RP_Decision_Proceso_Det` |
+| Decisión | `RP_Decision_Plazos` | `RP_Decision_Plazos_Det` |
+| Decisión | `RP_Decision_Sgte_Paso` | `RP_Decision_Paso_Det` |
 
-La fórmula `Nota_Final_Primera_Reuni_n` se calcula sola a partir de estos
-booleanos (no se escribe directo: es de solo lectura).
-
-### Feedback
+### Feedback y transcripción
 | Campo | Origen |
 |---|---|
-| `Puntos_fuertes_detectados` | `puntos_fuertes` del coach |
-| `Oportunidades_de_mejora` | `oportunidades` del coach |
-| `Recomendaci_n_pr_ctica_para_tu_pr_ximo_roleplay` | `recomendacion` / `general` |
+| `RP_Puntos_Fuertes` | `puntos_fuertes` del coach |
+| `RP_Oportunidades` | `oportunidades` del coach |
+| `RP_Recomendacion` | `recomendacion` / `general` |
 | `Transcripci_n_Roleplay` | transcripción completa de la conversación |
 
 ---
 
-## ¿Hacen falta campos nuevos?
+## Campos creados para esta iniciativa
 
-La rúbrica ya existía completa (booleano + comentario por criterio, notas por
-fórmula y feedback). El **único** campo que faltaba era para la **transcripción
-completa** (el módulo solo guardaba audio por URL en `Audio_Rolplay`), así que
-se creó:
+Se crearon **38 campos exclusivos `RP_`** (8 escenario + 2 notas + 24 criterios
+[12 sí/no + 12 comentarios] + 3 feedback + 1 fecha) más el campo
+`Transcripci_n_Roleplay` (textarea *large*, 32k). Ninguno se comparte con
+Dapta. La nota final del flujo Dapta (`Nota_Final_Primera_Reuni_n`) **no** se
+ve afectada por estos registros porque la app no marca sus booleanos.
 
-- **`Transcripci_n_Roleplay`** — `Transcripción Roleplay`, tipo *textarea large*
-  (hasta 32.000 caracteres). La app guarda ahí toda la conversación
-  (ejecutivo + cliente simulado).
+### Paso 5 — Agrupar los campos en su propia sección (UI, una vez)
 
-No se necesitan más campos.
+Los campos ya existen, pero la **sección** (agrupación visual) no se puede crear
+por API; hazlo una sola vez en el editor de layout:
+
+1. **Setup → Personalización → Módulos y Campos → `Roleplays Academia` →
+   Layouts →** abre el layout principal.
+2. Arrastra **`+ New Section`** y nómbrala **`Roleplay Simulador (Web)`**.
+3. Arrastra a esa sección todos los campos con prefijo **`RP_`** (aparecen en
+   la bandeja de campos sin asignar) y el campo **`Transcripción Roleplay`**.
+4. **Guardar layout.**
+
+Así el flujo de la app queda visualmente separado del de Dapta.
 
 ---
 
