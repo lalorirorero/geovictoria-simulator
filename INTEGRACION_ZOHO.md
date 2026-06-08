@@ -83,8 +83,9 @@ https://geovictoria-simulator.vercel.app/?source=zoho
 > **¿Hosting interno o paquete (ZET/Sigma)?** El `plugin-manifest.json` y el
 > CLI `zet` solo son necesarios si hospedas el widget *dentro* de Zoho (zip) o
 > lo publicas como extensión en el Marketplace. Para **URL externa en Vercel**
-> no hace falta manifest: basta la Base URL. Si prefieres empaquetarlo como
-> extensión, dilo y agrego el `plugin-manifest.json` + estructura ZET.
+> no hace falta manifest: basta la Base URL. Si prefieres el camino empaquetado,
+> ya está la estructura lista en **`zoho-extension/`** (ver su `README.md`):
+> `plugin-manifest.json` + un `widget.html` que redirige a la app de Vercel.
 
 ---
 
@@ -114,12 +115,16 @@ que funcione dentro del iframe del widget:
 - La app ya envía `Permissions-Policy: microphone=(self)` (ver `next.config.js`).
 - El navegador pedirá permiso de micrófono la primera vez; el usuario debe
   **Permitir**.
-- Si el popup del widget **no** propaga el permiso de micrófono (algunos
-  contenedores de Zoho no incluyen `allow="microphone"` en el iframe), el
-  reconocimiento de voz no arrancará. En ese caso, abre el widget como
-  **Web Tab** a pantalla completa, o agrega un botón que abra
-  `https://.../?source=zoho` en una **pestaña nueva** (ahí el micrófono no
-  está restringido por el iframe). Avísame y lo dejo como fallback automático.
+- **Fallback automático (ya implementado):** al iniciar la llamada la app
+  comprueba el acceso al micrófono. Si el popup del widget **no** propaga el
+  permiso (algunos contenedores de Zoho no incluyen `allow="microphone"` en el
+  iframe), la app muestra un aviso y un botón **"Abrir a pantalla completa ↗"**
+  que abre el simulador en una pestaña nueva, donde el micrófono no está
+  restringido por el iframe.
+  - Ojo: en esa pestaña a pantalla completa **no hay sesión de Zoho**, así que
+    el resultado **no se guarda solo** en el CRM (es para practicar con voz).
+    Para guardado automático, el roleplay debe completarse **dentro** del
+    widget con el micrófono permitido.
 
 ---
 
@@ -167,17 +172,22 @@ booleanos (no se escribe directo: es de solo lectura).
 | `Puntos_fuertes_detectados` | `puntos_fuertes` del coach |
 | `Oportunidades_de_mejora` | `oportunidades` del coach |
 | `Recomendaci_n_pr_ctica_para_tu_pr_ximo_roleplay` | `recomendacion` / `general` |
+| `Transcripci_n_Roleplay` | transcripción completa de la conversación |
 
 ---
 
 ## ¿Hacen falta campos nuevos?
 
-**No para guardar el resultado**: el módulo ya tiene la rúbrica completa
-(booleano + comentario por criterio), las notas por fórmula y los campos de
-feedback. Solo faltaría —y es **opcional**— un campo para la **transcripción
-completa** de la conversación (hoy el módulo solo guarda audio por URL en
-`Audio_Rolplay`). Si lo quieres, puedo crear un campo `textarea`
-(p. ej. `Transcripcion_Roleplay`) y guardarlo ahí.
+La rúbrica ya existía completa (booleano + comentario por criterio, notas por
+fórmula y feedback). El **único** campo que faltaba era para la **transcripción
+completa** (el módulo solo guardaba audio por URL en `Audio_Rolplay`), así que
+se creó:
+
+- **`Transcripci_n_Roleplay`** — `Transcripción Roleplay`, tipo *textarea large*
+  (hasta 32.000 caracteres). La app guarda ahí toda la conversación
+  (ejecutivo + cliente simulado).
+
+No se necesitan más campos.
 
 ---
 

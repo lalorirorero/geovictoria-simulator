@@ -87,7 +87,8 @@ export function deriveStageView(evaluation) {
 //             nombreEmpresa, dificultad }
 // evaluation: salida JSON del coach (criterios + feedback)
 // user: usuario actual de Zoho ({ id, ... }) → queda como Owner
-export function buildRoleplayApiData({ scenario, evaluation, user }) {
+// transcript: transcripcion completa de la conversacion (opcional)
+export function buildRoleplayApiData({ scenario, evaluation, user, transcript }) {
   const data = {
     Name: clip(scenario.recordName, 120),
     Estado: "Evaluado",
@@ -128,6 +129,10 @@ export function buildRoleplayApiData({ scenario, evaluation, user }) {
     2000
   );
   if (rec) data.Recomendaci_n_pr_ctica_para_tu_pr_ximo_roleplay = rec;
+
+  // ── Transcripcion completa (textarea large, 32k) ──
+  const tr = clip(transcript, 32000);
+  if (tr) data.Transcripci_n_Roleplay = tr;
 
   return data;
 }

@@ -311,6 +311,7 @@ export default function App() {
   const messagesRef = useRef([]);
   const phaseRef = useRef("lobby");
   const loadingRef = useRef(false);
+  const transcriptRef = useRef("");
 
   const [selectedDisc, setSelectedDisc] = useState(null);
   const [selectedIndustry, setSelectedIndustry] = useState(null);
@@ -327,6 +328,7 @@ export default function App() {
   const [zohoUser, setZohoUser] = useState(null);
   const [zohoSave, setZohoSave] = useState("idle"); // idle|saving|saved|error
   const [zohoRecordId, setZohoRecordId] = useState(null);
+  const [micBlocked, setMicBlocked] = useState(false);
   const zohoUserRef = useRef(null);
   useEffect(() => { zohoUserRef.current = zohoUser; }, [zohoUser]);
 
@@ -394,7 +396,13 @@ export default function App() {
     rec.interimResults = false;
     rec.onstart = () => setListening(true);
     rec.onend = () => setListening(false);
-    rec.onerror = () => setListening(false);
+    rec.onerror = (e) => {
+      setListening(false);
+      // El iframe del widget de Zoho puede no propagar el permiso de microfono.
+      if (e && (e.error === "not-allowed" || e.error === "service-not-allowed")) {
+        setMicBlocked(true);
+      }
+    };
     rec.onresult = (e) => {
       const text = e.results[0][0].transcript;
       if (text.trim()) sendVoice(text, profileSnap);
@@ -458,9 +466,41 @@ export default function App() {
     setPhase("briefing");
   };
 
+  // Abre el simulador a pantalla completa en una pestaña nueva. Sirve de
+  // fallback cuando el iframe del widget bloquea el microfono (la voz no
+  // funciona dentro del popup de Zoho). En esa pestaña el resultado NO se
+  // guarda solo en Zoho — es para practicar con voz.
+  const openFullscreen = () => {
+    try {
+      window.open(window.location.origin + window.location.pathname, "_blank", "noopener");
+    } catch {}
+  };
+
+  // Verifica el acceso al microfono antes de arrancar. Si el contenedor lo
+  // bloquea (politica de permisos del iframe), lo marcamos para ofrecer el
+  // fallback a pantalla completa.
+  const checkMic = async () => {
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(t => t.stop());
+        setMicBlocked(false);
+        return true;
+      }
+    } catch (e) {
+      if (e && (e.name === "NotAllowedError" || e.name === "SecurityError")) {
+        setMicBlocked(true);
+        return false;
+      }
+    }
+    return true;
+  };
+
   const beginCall = async (profileSnap) => {
     setPhase("call");
     phaseRef.current = "call";
+    const micOk = await checkMic();
+    if (!micOk) { setPhase("briefing"); phaseRef.current = "briefing"; return; }
     setLoading(true);
     loadingRef.current = true;
     const sys = buildSystemPrompt(profileSnap);
@@ -483,6 +523,7 @@ export default function App() {
     const transcript = messagesRef.current.map(m =>
       `${m.role === "user" ? "EJECUTIVO" : profile.nombre}: ${m.content}`
     ).join("\n\n");
+    transcriptRef.current = transcript;
 
     const evalSys = buildEvaluatorPrompt(transcript, profile.discKey, profile.industry, profile.paisKey);
     const raw = await callClaude(
@@ -524,7 +565,7 @@ export default function App() {
         nombreEmpresa: null,
         dificultad: DEFAULT_DIFICULTAD,
       };
-      const apiData = buildRoleplayApiData({ scenario, evaluation: parsed, user: zohoUserRef.current });
+      const apiData = buildRoleplayApiData({ scenario, evaluation: parsed, user: zohoUserRef.current, transcript: transcriptRef.current });
       const res = await insertRoleplayRecord(apiData);
       const rec = res && res.data && res.data[0];
       if (rec && rec.code === "SUCCESS") {
@@ -762,6 +803,20 @@ export default function App() {
       {/* ── BRIEFING ── */}
       {phase === "briefing" && disc && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "20px 16px", gap: 16, maxWidth: 480, margin: "0 auto", width: "100%" }}>
+          {micBlocked && (
+            <div style={{ background: "#F59E0B12", border: "1px solid #F59E0B44", borderRadius: 12, padding: "14px 16px" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#F59E0B", marginBottom: 6 }}>🎙️ Micrófono bloqueado</div>
+              <div style={{ fontSize: 12, color: "#B98A4A", lineHeight: 1.6, marginBottom: 10 }}>
+                El roleplay usa voz, pero el contenedor de Zoho no está permitiendo el micrófono en este popup.
+                Ábrelo a pantalla completa para practicar con voz. (En esa pestaña el resultado no se guarda solo en Zoho.)
+              </div>
+              <button className="btn" onClick={openFullscreen} style={{
+                background: "linear-gradient(135deg, #F59E0B, #D97706)", border: "none", borderRadius: 10,
+                padding: "10px 14px", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
+                fontFamily: "'Syne', sans-serif",
+              }}>Abrir a pantalla completa ↗</button>
+            </div>
+          )}
           <div style={{ textAlign: "center", paddingTop: 12 }}>
             <div style={{ fontSize: 11, color: "#4D9FFF", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".6px", marginBottom: 6 }}>Tu prospecto de hoy</div>
             <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 22, fontWeight: 800 }}>{profile.nombre}</div>
@@ -852,6 +907,18 @@ export default function App() {
               {turnCount} turnos
             </div>
           </div>
+
+          {micBlocked && (
+            <div style={{ position: "relative", zIndex: 2, margin: "0 16px", background: "#F59E0B14", border: "1px solid #F59E0B55", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ fontSize: 11, color: "#F0C070", lineHeight: 1.5, flex: 1 }}>
+                🎙️ El micrófono está bloqueado en este popup de Zoho. Ábrelo a pantalla completa para usar la voz.
+              </div>
+              <button className="btn" onClick={openFullscreen} style={{
+                background: "#F59E0B22", border: "1px solid #F59E0B66", color: "#F59E0B",
+                borderRadius: 8, padding: "6px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+              }}>Pantalla completa ↗</button>
+            </div>
+          )}
 
           {/* Main — avatar + status */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20, position: "relative", zIndex: 1 }}>
