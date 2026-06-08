@@ -30,8 +30,10 @@ módulo, **a nombre del usuario logueado**.
    `ZOHO.CRM.API.insertRecord({Entity:"Rolplay_Academia", APIData:{…}})`. Como
    la llamada usa la **sesión del usuario**, el registro queda creado y
    **asignado a su nombre** (campo `Owner`).
-5. Al pulsar **Cerrar**, la app llama `ZOHO.CRM.UI.Popup.closeReload()`, que
-   cierra el popup y **refresca la lista** para que el registro nuevo aparezca.
+5. Al pulsar **"Ver registro en Zoho →"**, la app llama
+   `ZOHO.CRM.UI.Record.open({Entity, RecordID})` y navega directo a la **ficha
+   del registro recién creado**, luego cierra el popup. (Si por alguna razón no
+   hay id, cae a `ZOHO.CRM.UI.Popup.closeReload()` y refresca la lista.)
 
 Archivos relevantes:
 - `app/lib/zoho.js` — carga e inicialización del SDK, `insertRecord`, cierre.
