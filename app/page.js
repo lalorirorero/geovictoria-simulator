@@ -1,6 +1,11 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { selectChunks, formatChunks } from "./data/kb";
+import { initZoho, insertRoleplayRecord, closeWidget, isZohoSource } from "./lib/zoho";
+import {
+  INDUSTRY_MAP, ROL_MAP, DEFAULT_DIFICULTAD,
+  STAGES, deriveStageView, buildRoleplayApiData,
+} from "./lib/zohoRoleplay";
 
 // ─── DISC + INDUSTRIA DATA ───────────────────────────────────────
 const DISC_PROFILES = {
@@ -179,7 +184,7 @@ function buildEvaluatorPrompt(transcript, discKey, industry, paisKey) {
   const idiomaNota = pais && pais.lang === "pt-BR"
     ? "\nIMPORTANTE: escribe TODOS los comentarios (campos 'comment' y 'general') en portugués de Brasil.\n"
     : "";
-  return `Eres un coach experto en ventas Sandler. Analiza esta simulacion de venta de GeoVictoria.
+  return `Eres un coach experto en ventas Sandler. Analiza esta simulacion de "Primera Reunion" (reunion de descubrimiento) de GeoVictoria.
 
 PERFIL DEL CLIENTE: DISC ${discKey} — ${DISC_PROFILES[discKey].name}
 INDUSTRIA: ${industry.name}${pais ? ` · PAIS: ${pais.name}` : ""}
@@ -187,14 +192,27 @@ ${reference ? `\n─── MATERIAL DE REFERENCIA (base de conocimiento GeoVicto
 TRANSCRIPCION:
 ${transcript}
 
-Evalua al ejecutivo en cada etapa Sandler. Responde SOLO en JSON con este formato exacto:
+Evalua si el ejecutivo CUMPLIO cada uno de los siguientes criterios de la metodologia (cada "met" es true solo si el ejecutivo lo logro de forma clara; el "comment" es una justificacion breve de 1 linea, max 200 caracteres).
+Responde SOLO en JSON con este formato exacto:
 {
-  "ufc": {"score": 0-10, "comment": "comentario breve de 1 linea"},
-  "modelo": {"score": 0-10, "comment": "comentario breve de 1 linea"},
-  "pain": {"score": 0-10, "comment": "comentario breve de 1 linea"},
-  "budget": {"score": 0-10, "comment": "comentario breve de 1 linea"},
-  "decision": {"score": 0-10, "comment": "comentario breve de 1 linea"},
-  "disc_adaptation": {"score": 0-10, "comment": "se adapto al perfil DISC del cliente"},
+  "criterios": {
+    "ufc_contrato": {"met": true, "comment": "establecio tiempo, proposito y un posible 'no' (UFC)"},
+    "ufc_roles": {"met": true, "comment": "presento su rol y el de GeoVictoria"},
+    "apertura_clara": {"met": true, "comment": "abrio la llamada clara y rapida"},
+    "apertura_saludo": {"met": true, "comment": "ajusto el saludo al perfil del prospecto"},
+    "modelo_empleados": {"met": true, "comment": "obtuvo la dotacion / cantidad de empleados"},
+    "modelo_sistema": {"met": true, "comment": "identifico el sistema actual de marcaje/asistencia"},
+    "pain_dolores": {"met": true, "comment": "excavo los dolores reales (nivel 2-3)"},
+    "pain_suenos": {"met": true, "comment": "exploro deseos/objetivos del prospecto"},
+    "budget_presupuesto": {"met": true, "comment": "abordo el presupuesto antes de presentar"},
+    "decision_proceso": {"met": true, "comment": "mapeo el proceso y a los decisores de compra"},
+    "decision_plazos": {"met": true, "comment": "indago los plazos para tomar la decision"},
+    "decision_siguiente_paso": {"met": true, "comment": "cerro con un siguiente paso concreto"}
+  },
+  "disc_adaptation": {"score": 0, "comment": "que tanto se adapto al perfil DISC del cliente (0-10)"},
+  "puntos_fuertes": "2-3 frases con lo mejor que hizo el ejecutivo",
+  "oportunidades": "2-3 frases con lo que debe mejorar",
+  "recomendacion": "1 recomendacion practica y accionable para su proximo roleplay",
   "general": "conclusion de 2 lineas con lo mejor y lo que debe mejorar"
 }`;
 }
@@ -210,11 +228,11 @@ function generateProfile(discKey, industryKey, rolKey, paisKey) {
   return { discKey, industry, industryKey, rol, rolKey, paisKey, nombre, cargo };
 }
 
-async function callClaude(messages, system, maxTokens = 300) {
+async function callClaude(messages, system, maxTokens = 300, model) {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, system, maxTokens }),
+    body: JSON.stringify({ messages, system, maxTokens, ...(model ? { model } : {}) }),
   });
   const data = await res.json();
   return data.text || "";
@@ -304,11 +322,31 @@ export default function App() {
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
 
+  // ── Modo widget de Zoho ──
+  const [zohoMode, setZohoMode] = useState(false);
+  const [zohoUser, setZohoUser] = useState(null);
+  const [zohoSave, setZohoSave] = useState("idle"); // idle|saving|saved|error
+  const [zohoRecordId, setZohoRecordId] = useState(null);
+  const zohoUserRef = useRef(null);
+  useEffect(() => { zohoUserRef.current = zohoUser; }, [zohoUser]);
+
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { loadingRef.current = loading; }, [loading]);
   useEffect(() => {
     try { if (sessionStorage.getItem("gv_auth") === "1") setAuthed(true); } catch {}
+  }, []);
+
+  // Si el simulador se abre desde Zoho (?source=zoho), la sesion de Zoho
+  // es la autenticacion: saltamos la pantalla de contraseña e inicializamos
+  // el SDK para obtener al usuario logueado (futuro Owner del registro).
+  useEffect(() => {
+    if (!isZohoSource()) return;
+    setZohoMode(true);
+    setAuthed(true);
+    initZoho()
+      .then(({ user }) => setZohoUser(user))
+      .catch(() => {});
   }, []);
 
   const tryLogin = async () => {
@@ -444,16 +482,56 @@ export default function App() {
     const raw = await callClaude(
       [{ role: "user", content: "Evalua esta simulacion." }],
       evalSys,
-      800
+      1400,
+      "claude-sonnet-4-6"
     );
 
+    let parsed = null;
     try {
       const clean = raw.replace(/```json|```/g, "").trim();
-      setEvaluation(JSON.parse(clean));
+      parsed = JSON.parse(clean);
+      setEvaluation(parsed);
     } catch {
       setEvaluation({ error: raw });
     }
     setPhase("results");
+
+    // En modo widget, persistimos el resultado en un registro nuevo de Zoho.
+    if (zohoMode && parsed && parsed.criterios) {
+      saveToZoho(parsed, profile);
+    }
+  };
+
+  // Crea el registro en Rolplay_Academia a nombre del usuario logueado.
+  const saveToZoho = async (parsed, prof) => {
+    setZohoSave("saving");
+    try {
+      const pais = PAISES[prof.paisKey];
+      const empleados = parseInt(String(prof.industry.size).replace(/\D/g, ""), 10);
+      const scenario = {
+        recordName: `${prof.nombre} · ${prof.cargo} · ${prof.industry.name}`,
+        industria: INDUSTRY_MAP[prof.industryKey] || null,
+        rol: ROL_MAP[prof.rolKey] || null,
+        pais: pais ? pais.name : prof.paisKey,
+        cargo: prof.cargo,
+        empleados: Number.isFinite(empleados) ? empleados : null,
+        nombreEmpresa: null,
+        dificultad: DEFAULT_DIFICULTAD,
+      };
+      const apiData = buildRoleplayApiData({ scenario, evaluation: parsed, user: zohoUserRef.current });
+      const res = await insertRoleplayRecord(apiData);
+      const rec = res && res.data && res.data[0];
+      if (rec && rec.code === "SUCCESS") {
+        setZohoRecordId(rec.details && rec.details.id);
+        setZohoSave("saved");
+      } else {
+        console.error("Zoho insert no-success:", res);
+        setZohoSave("error");
+      }
+    } catch (e) {
+      console.error("Zoho insert error:", e);
+      setZohoSave("error");
+    }
   };
 
   const reset = () => {
@@ -854,25 +932,59 @@ export default function App() {
             <div style={{ fontSize: 12, color: "#3A4A6A" }}>{profile.nombre} · DISC {profile.discKey} · {profile.industry.name}</div>
           </div>
 
+          {/* Estado de guardado en Zoho (solo modo widget) */}
+          {zohoMode && (
+            <div style={{
+              marginBottom: 16, borderRadius: 12, padding: "12px 14px",
+              display: "flex", alignItems: "center", gap: 10, fontSize: 12, fontWeight: 600,
+              background: zohoSave === "saved" ? "#10B98112" : zohoSave === "error" ? "#EF444412" : "#0A1628",
+              border: `1px solid ${zohoSave === "saved" ? "#10B98144" : zohoSave === "error" ? "#EF444444" : "#1E2D45"}`,
+              color: zohoSave === "saved" ? "#10B981" : zohoSave === "error" ? "#EF4444" : "#4D9FFF",
+            }}>
+              {zohoSave === "saving" && <><span className="dot" style={{ width: 8, height: 8, borderRadius: "50%", background: "#4D9FFF" }} /> Guardando resultado en Zoho...</>}
+              {zohoSave === "saved" && <>✓ Resultado guardado en Zoho{zohoUser?.full_name ? ` a nombre de ${zohoUser.full_name}` : ""}.</>}
+              {zohoSave === "error" && <>⚠ No se pudo guardar en Zoho. Revisa los permisos del widget e inténtalo de nuevo.</>}
+              {zohoSave === "error" && (
+                <button className="btn" onClick={() => saveToZoho(evaluation, profile)} style={{
+                  marginLeft: "auto", background: "#EF444422", border: "1px solid #EF444455",
+                  color: "#EF4444", borderRadius: 8, padding: "5px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer",
+                }}>Reintentar</button>
+              )}
+            </div>
+          )}
+
           {evaluation.error ? (
             <div style={{ background: "#1A2235", borderRadius: 12, padding: 16, fontSize: 12, color: "#6B7A99" }}>{evaluation.error}</div>
           ) : (
+            (() => {
+              const stageView = deriveStageView(evaluation);
+              return (
             <>
-              {/* Scores */}
+              {/* Scores por etapa (derivados de los criterios cumplidos) */}
               <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-                {ETAPAS.map(etapa => {
-                  const ev = evaluation[etapa.key];
+                {STAGES.map(etapa => {
+                  const ev = stageView[etapa.key];
                   if (!ev) return null;
                   return (
                     <div key={etapa.key} style={{
                       background: "#111827", border: "1px solid #1E1E2E",
                       borderRadius: 12, padding: "12px 14px",
-                      display: "flex", alignItems: "center", gap: 12,
+                      display: "flex", alignItems: "flex-start", gap: 12,
                     }}>
                       <ScoreBadge score={ev.score} />
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>{etapa.label}</div>
-                        <div style={{ fontSize: 11, color: "#4A5A7A" }}>{ev.comment}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, display: "flex", justifyContent: "space-between" }}>
+                          <span>{etapa.label}</span>
+                          <span style={{ fontSize: 11, color: "#3A4A6A", fontWeight: 600 }}>{ev.met}/{ev.total}</span>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                          {ev.items.map(it => (
+                            <div key={it.key} style={{ fontSize: 11, color: it.met ? "#7FA88F" : "#5A6A8A", display: "flex", gap: 6 }}>
+                              <span style={{ color: it.met ? "#10B981" : "#EF4444" }}>{it.met ? "✓" : "✗"}</span>
+                              <span>{it.label}</span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   );
@@ -896,7 +1008,7 @@ export default function App() {
 
               {/* Overall score */}
               {(() => {
-                const scores = [...ETAPAS.map(e => evaluation[e.key]?.score || 0), evaluation.disc_adaptation?.score || 0];
+                const scores = [...STAGES.map(e => stageView[e.key]?.score || 0), evaluation.disc_adaptation?.score || 0];
                 const avg = Math.round(scores.reduce((a,b) => a+b, 0) / scores.length);
                 const color = avg >= 7 ? "#10B981" : avg >= 4 ? "#F59E0B" : "#EF4444";
                 return (
@@ -918,20 +1030,34 @@ export default function App() {
                 </div>
               )}
             </>
+              );
+            })()
           )}
 
           <div style={{ display: "flex", gap: 10 }}>
-            <button className="btn" onClick={() => { setPhase("lobby"); setSelectedDisc(null); setSelectedIndustry(null); setSelectedRol(null); setSelectedPais(null); }} style={{
-              flex: 1, background: "linear-gradient(135deg, #0066FF, #0044CC)",
-              border: "none", borderRadius: 12, padding: "14px",
-              color: "#fff", fontSize: 13, fontWeight: 700,
-              cursor: "pointer", transition: "all .2s",
-              fontFamily: "'Syne', sans-serif",
-            }}>Nueva simulacion →</button>
-            <button className="btn" onClick={() => { setPhase("lobby"); setSelectedDisc(null); setSelectedIndustry(null); setSelectedRol(null); setSelectedPais(null); setProfile(null); setMessages([]); setEvaluation(null); setTurnCount(0); }} style={{
-              width: 48, background: "#111827", border: "1px solid #1E1E2E",
-              borderRadius: 12, cursor: "pointer", fontSize: 18, transition: "all .2s",
-            }}>🏠</button>
+            {zohoMode ? (
+              <button className="btn" onClick={() => closeWidget()} disabled={zohoSave === "saving"} style={{
+                flex: 1, background: zohoSave === "saving" ? "#1A2235" : "linear-gradient(135deg, #0066FF, #0044CC)",
+                border: "none", borderRadius: 12, padding: "14px",
+                color: zohoSave === "saving" ? "#3A4A6A" : "#fff", fontSize: 13, fontWeight: 700,
+                cursor: zohoSave === "saving" ? "not-allowed" : "pointer", transition: "all .2s",
+                fontFamily: "'Syne', sans-serif",
+              }}>{zohoSave === "saving" ? "Guardando..." : "Cerrar"}</button>
+            ) : (
+              <>
+                <button className="btn" onClick={() => { setPhase("lobby"); setSelectedDisc(null); setSelectedIndustry(null); setSelectedRol(null); setSelectedPais(null); }} style={{
+                  flex: 1, background: "linear-gradient(135deg, #0066FF, #0044CC)",
+                  border: "none", borderRadius: 12, padding: "14px",
+                  color: "#fff", fontSize: 13, fontWeight: 700,
+                  cursor: "pointer", transition: "all .2s",
+                  fontFamily: "'Syne', sans-serif",
+                }}>Nueva simulacion →</button>
+                <button className="btn" onClick={() => { setPhase("lobby"); setSelectedDisc(null); setSelectedIndustry(null); setSelectedRol(null); setSelectedPais(null); setProfile(null); setMessages([]); setEvaluation(null); setTurnCount(0); }} style={{
+                  width: 48, background: "#111827", border: "1px solid #1E1E2E",
+                  borderRadius: 12, cursor: "pointer", fontSize: 18, transition: "all .2s",
+                }}>🏠</button>
+              </>
+            )}
           </div>
         </div>
       )}
