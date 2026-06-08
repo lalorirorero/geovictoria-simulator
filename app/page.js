@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { selectChunks, formatChunks } from "./data/kb";
-import { initZoho, insertRoleplayRecord, closeWidget, isZohoSource, isEmbedded } from "./lib/zoho";
+import { initZoho, insertRoleplayRecord, closeWidget, openRecordAndClose, isZohoSource, isEmbedded } from "./lib/zoho";
 import {
   DEFAULT_DIFICULTAD,
   STAGES, deriveStageView, buildRoleplayApiData,
@@ -1027,13 +1027,15 @@ export default function App() {
 
           <div style={{ display: "flex", gap: 10 }}>
             {zohoMode ? (
-              <button className="btn" onClick={() => closeWidget()} disabled={zohoSave === "saving"} style={{
+              <button className="btn"
+                onClick={() => (zohoRecordId ? openRecordAndClose(zohoRecordId) : closeWidget())}
+                disabled={zohoSave === "saving"} style={{
                 flex: 1, background: zohoSave === "saving" ? "#1A2235" : "linear-gradient(135deg, #0066FF, #0044CC)",
                 border: "none", borderRadius: 12, padding: "14px",
                 color: zohoSave === "saving" ? "#3A4A6A" : "#fff", fontSize: 13, fontWeight: 700,
                 cursor: zohoSave === "saving" ? "not-allowed" : "pointer", transition: "all .2s",
                 fontFamily: "'Syne', sans-serif",
-              }}>{zohoSave === "saving" ? "Guardando..." : "Cerrar"}</button>
+              }}>{zohoSave === "saving" ? "Guardando..." : zohoRecordId ? "Ver registro en Zoho →" : "Cerrar"}</button>
             ) : (
               <>
                 <button className="btn" onClick={() => { setPhase("lobby"); setSelectedDisc(null); setSelectedIndustry(null); setSelectedRol(null); setSelectedPais(null); }} style={{

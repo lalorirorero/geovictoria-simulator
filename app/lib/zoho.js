@@ -109,3 +109,25 @@ export async function closeWidget() {
     }
   } catch {}
 }
+
+// Navega a la ficha (detail view) del registro recien creado y cierra el popup.
+// Si no se puede abrir la ficha, cae a cerrar el popup normalmente.
+export async function openRecordAndClose(recordId) {
+  const ZOHO = await loadZohoSdk();
+  let opened = false;
+  try {
+    if (recordId && ZOHO && ZOHO.CRM && ZOHO.CRM.UI && ZOHO.CRM.UI.Record && ZOHO.CRM.UI.Record.open) {
+      await ZOHO.CRM.UI.Record.open({ Entity: ROLEPLAY_MODULE, RecordID: String(recordId) });
+      opened = true;
+    }
+  } catch {}
+  try {
+    const Popup = ZOHO && ZOHO.CRM && ZOHO.CRM.UI && ZOHO.CRM.UI.Popup;
+    if (Popup) {
+      // Si abrimos la ficha, cerramos sin recargar el listado.
+      if (opened && Popup.close) await Popup.close();
+      else if (Popup.closeReload) await Popup.closeReload();
+      else if (Popup.close) await Popup.close();
+    }
+  } catch {}
+}
