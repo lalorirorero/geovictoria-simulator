@@ -81,6 +81,7 @@ export function computeFinalScore(evaluation) {
 export function buildRoleplayApiData({ scenario, evaluation, user, transcript }) {
   const data = {
     Name: clip(scenario.recordName, 120),
+    Canal_Roleplay: "Web App",
     RP_Fecha_Evaluacion: new Date().toISOString().slice(0, 10),
   };
 

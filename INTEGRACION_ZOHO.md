@@ -136,7 +136,9 @@ que funcione dentro del iframe del widget:
 > `Nota_Final_Primera_Reuni_n`, así no se cruzan los dos flujos.
 
 Al terminar, se crea un registro con `Owner = usuario logueado`,
-`Name = {nombre} · {cargo} · {industria}` y `RP_Fecha_Evaluacion = hoy`, más:
+`Name = {nombre} · {cargo} · {industria}`, `Canal_Roleplay = "Web App"`
+(distingue el origen frente a "Dapta Teléfono") y `RP_Fecha_Evaluacion = hoy`,
+más:
 
 ### Escenario (de lo elegido en el widget)
 | Campo `RP_` | Tipo | Origen |
