@@ -21,11 +21,10 @@ módulo, **a nombre del usuario logueado**.
    `ZOHO.embeddedApp.on("PageLoad", …)` + `ZOHO.embeddedApp.init()`. El evento
    `PageLoad` **solo dispara dentro del contenedor de Zoho**; cuando dispara,
    la app sabe que está corriendo como widget y entonces:
-   - Salta la pantalla de contraseña (la sesión de Zoho es la autenticación).
-   - Obtiene al **usuario logueado** con `ZOHO.CRM.CONFIG.getCurrentUser()`.
-   - (Un iframe ajeno **no** recibe `PageLoad`, así que el login no se salta
-     fuera de Zoho. El parámetro `?source=zoho` es opcional: solo adelanta la
-     carga del SDK.)
+   - Obtiene al **usuario logueado** con `ZOHO.CRM.CONFIG.getCurrentUser()`
+     (será el `Owner` del registro). La sesión de Zoho es la autenticación;
+     **la app no tiene login propio**.
+   - (El parámetro `?source=zoho` es opcional: solo adelanta la carga del SDK.)
 3. El usuario configura el escenario y hace el roleplay como siempre.
 4. Al colgar, el coach evalúa la conversación y la app crea un registro con
    `ZOHO.CRM.API.insertRecord({Entity:"Rolplay_Academia", APIData:{…}})`. Como
@@ -46,7 +45,7 @@ Archivos relevantes:
 ## Paso 1 — Desplegar la app en Vercel
 
 Despliega normalmente (ya tienes el proyecto). Asegúrate de tener las variables
-`ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY` y la de la contraseña en Vercel.
+`ANTHROPIC_API_KEY` y `ELEVENLABS_API_KEY` en Vercel.
 Anota la URL pública, por ejemplo:
 
 ```
@@ -212,12 +211,12 @@ Así el flujo de la app queda visualmente separado del de Dapta.
 
 ## Probar
 
-1. Fuera de Zoho la app se comporta normal: **sí** pide contraseña (el login
-   solo se salta dentro del contenedor de Zoho, cuando dispara `PageLoad`).
+1. La app **no tiene login**: carga directo al lobby (dentro o fuera de Zoho).
+   El guardado en Zoho solo ocurre dentro del contenedor (cuando dispara
+   `PageLoad`); fuera de Zoho la app funciona pero no guarda.
 2. Dentro de Zoho, pulsa **Ejecutar Roleplay**, completa un roleplay corto y
    verifica que:
-   - No pidió contraseña.
    - Al terminar aparece el banner "Resultado guardado en Zoho a nombre de …".
    - Se creó un registro nuevo en *Roleplays Academia* a tu nombre, con
-     `Estado = Evaluado`, el escenario y los criterios marcados.
+     `Canal_Roleplay = Web App`, el escenario y los criterios marcados.
    - Al pulsar **Cerrar**, la lista se refresca y muestra el registro nuevo.

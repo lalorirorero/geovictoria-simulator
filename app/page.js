@@ -318,11 +318,6 @@ export default function App() {
   const [selectedRol, setSelectedRol] = useState(null);
   const [selectedPais, setSelectedPais] = useState(null);
 
-  const [authed, setAuthed] = useState(false);
-  const [pwInput, setPwInput] = useState("");
-  const [authError, setAuthError] = useState("");
-  const [authLoading, setAuthLoading] = useState(false);
-
   // ── Modo widget de Zoho ──
   const [zohoMode, setZohoMode] = useState(false);
   const [zohoUser, setZohoUser] = useState(null);
@@ -335,50 +330,22 @@ export default function App() {
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { loadingRef.current = loading; }, [loading]);
-  useEffect(() => {
-    try { if (sessionStorage.getItem("gv_auth") === "1") setAuthed(true); } catch {}
-  }, []);
 
   // Deteccion del modo widget. Inicializamos el SDK cuando la app corre
-  // embebida (iframe) o con ?source=zoho. Solo activamos zohoMode y saltamos
-  // el login si PageLoad realmente dispara (inZoho), es decir, estamos dentro
-  // del contenedor de Zoho — no en un iframe ajeno. La sesion de Zoho es la
-  // autenticacion y el usuario logueado sera el Owner del registro.
+  // embebida (iframe) o con ?source=zoho. Si PageLoad dispara (inZoho),
+  // estamos dentro del contenedor de Zoho: tomamos al usuario logueado como
+  // Owner del registro. No hay login: el acceso es solo desde Zoho.
   useEffect(() => {
     if (!isEmbedded() && !isZohoSource()) return;
     initZoho()
       .then(({ user, inZoho }) => {
         if (inZoho) {
           setZohoMode(true);
-          setAuthed(true);
           setZohoUser(user);
         }
       })
       .catch(() => {});
   }, []);
-
-  const tryLogin = async () => {
-    setAuthError("");
-    setAuthLoading(true);
-    try {
-      const res = await fetch("/api/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: pwInput }),
-      });
-      const data = await res.json();
-      if (res.ok && data.ok) {
-        try { sessionStorage.setItem("gv_auth", "1"); } catch {}
-        setAuthed(true);
-        setPwInput("");
-      } else {
-        setAuthError("Contraseña incorrecta.");
-      }
-    } catch {
-      setAuthError("Error de conexión. Intenta de nuevo.");
-    }
-    setAuthLoading(false);
-  };
 
   const stopListening = () => {
     if (recRef.current) { try { recRef.current.abort(); } catch {} recRef.current = null; }
@@ -591,56 +558,6 @@ export default function App() {
   };
 
   const disc = profile ? DISC_PROFILES[profile.discKey] : null;
-
-  // ── Pantalla de seguridad (login) ──
-  if (!authed) {
-    return (
-      <div style={{
-        minHeight: "100vh", background: "#0B0F1A", color: "#F0F4FF",
-        fontFamily: "'DM Sans', sans-serif",
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        padding: "24px 20px", gap: 18,
-      }}>
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Syne:wght@700;800&display=swap'); *{box-sizing:border-box;margin:0;padding:0;} input:focus{outline:none;}`}</style>
-        <div style={{ fontSize: 40 }}>🔒</div>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 22, fontWeight: 800 }}>Simulador de Ventas</div>
-          <div style={{ fontSize: 12, color: "#3A4A6A", marginTop: 4 }}>Ingresa la contraseña para continuar</div>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%", maxWidth: 320 }}>
-          <input
-            type="password"
-            value={pwInput}
-            onChange={(e) => setPwInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && pwInput && !authLoading) tryLogin(); }}
-            placeholder="Contraseña"
-            autoFocus
-            style={{
-              background: "#111827", border: `2px solid ${authError ? "#EF4444" : "#1E2D45"}`,
-              borderRadius: 12, padding: "14px 16px", color: "#F0F4FF", fontSize: 14,
-              fontFamily: "'DM Sans', sans-serif",
-            }}
-          />
-          {authError && <div style={{ fontSize: 12, color: "#EF4444" }}>{authError}</div>}
-          <button
-            onClick={() => pwInput && !authLoading && tryLogin()}
-            disabled={!pwInput || authLoading}
-            style={{
-              background: pwInput && !authLoading ? "linear-gradient(135deg, #0066FF, #0044CC)" : "#1A2235",
-              border: "none", borderRadius: 12, padding: "14px",
-              color: pwInput && !authLoading ? "#fff" : "#1E2D45",
-              fontSize: 14, fontWeight: 700, cursor: pwInput && !authLoading ? "pointer" : "not-allowed",
-              fontFamily: "'Syne', sans-serif",
-            }}>
-            {authLoading ? "Verificando..." : "Ingresar"}
-          </button>
-        </div>
-        <div style={{ fontSize: 10, color: "#162035", textAlign: "center" }}>
-          GeoVictoria · Entrenamiento Comercial
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div style={{
