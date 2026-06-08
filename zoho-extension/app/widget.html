@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Roleplay GeoVictoria</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0B0F1A; color: #6B7A99;
+      font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; }
+  </style>
+</head>
+<body>
+  <div>Cargando simulador…</div>
+  <!--
+    La app real es una app Next.js (necesita servidor para /api/chat, /api/tts,
+    /api/evaluate), por eso NO puede empaquetarse como archivos estaticos del
+    widget. Este HTML solo redirige al despliegue de Vercel; el iframe sigue
+    siendo hijo del contenedor de Zoho, asi que el Embedded App SDK (que carga
+    la app de Vercel) se comunica igual con Zoho y guarda el resultado a nombre
+    del usuario logueado.
+
+    Cambia la URL por la de tu despliegue si es distinta.
+  -->
+  <script>
+    location.replace("https://geovictoria-simulator.vercel.app/");
+  </script>
+</body>
+</html>

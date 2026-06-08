@@ -1,6 +1,11 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { selectChunks, formatChunks } from "./data/kb";
+import { initZoho, insertRoleplayRecord, closeWidget, isZohoSource, isEmbedded } from "./lib/zoho";
+import {
+  DEFAULT_DIFICULTAD,
+  STAGES, deriveStageView, buildRoleplayApiData,
+} from "./lib/zohoRoleplay";
 
 // ─── DISC + INDUSTRIA DATA ───────────────────────────────────────
 const DISC_PROFILES = {
@@ -179,7 +184,7 @@ function buildEvaluatorPrompt(transcript, discKey, industry, paisKey) {
   const idiomaNota = pais && pais.lang === "pt-BR"
     ? "\nIMPORTANTE: escribe TODOS los comentarios (campos 'comment' y 'general') en portugués de Brasil.\n"
     : "";
-  return `Eres un coach experto en ventas Sandler. Analiza esta simulacion de venta de GeoVictoria.
+  return `Eres un coach experto en ventas Sandler. Analiza esta simulacion de "Primera Reunion" (reunion de descubrimiento) de GeoVictoria.
 
 PERFIL DEL CLIENTE: DISC ${discKey} — ${DISC_PROFILES[discKey].name}
 INDUSTRIA: ${industry.name}${pais ? ` · PAIS: ${pais.name}` : ""}
@@ -187,14 +192,27 @@ ${reference ? `\n─── MATERIAL DE REFERENCIA (base de conocimiento GeoVicto
 TRANSCRIPCION:
 ${transcript}
 
-Evalua al ejecutivo en cada etapa Sandler. Responde SOLO en JSON con este formato exacto:
+Evalua si el ejecutivo CUMPLIO cada uno de los siguientes criterios de la metodologia (cada "met" es true solo si el ejecutivo lo logro de forma clara; el "comment" es una justificacion breve de 1 linea, max 200 caracteres).
+Responde SOLO en JSON con este formato exacto:
 {
-  "ufc": {"score": 0-10, "comment": "comentario breve de 1 linea"},
-  "modelo": {"score": 0-10, "comment": "comentario breve de 1 linea"},
-  "pain": {"score": 0-10, "comment": "comentario breve de 1 linea"},
-  "budget": {"score": 0-10, "comment": "comentario breve de 1 linea"},
-  "decision": {"score": 0-10, "comment": "comentario breve de 1 linea"},
-  "disc_adaptation": {"score": 0-10, "comment": "se adapto al perfil DISC del cliente"},
+  "criterios": {
+    "ufc_contrato": {"met": true, "comment": "establecio tiempo, proposito y un posible 'no' (UFC)"},
+    "ufc_roles": {"met": true, "comment": "presento su rol y el de GeoVictoria"},
+    "apertura_clara": {"met": true, "comment": "abrio la llamada clara y rapida"},
+    "apertura_saludo": {"met": true, "comment": "ajusto el saludo al perfil del prospecto"},
+    "modelo_empleados": {"met": true, "comment": "obtuvo la dotacion / cantidad de empleados"},
+    "modelo_sistema": {"met": true, "comment": "identifico el sistema actual de marcaje/asistencia"},
+    "pain_dolores": {"met": true, "comment": "excavo los dolores reales (nivel 2-3)"},
+    "pain_suenos": {"met": true, "comment": "exploro deseos/objetivos del prospecto"},
+    "budget_presupuesto": {"met": true, "comment": "abordo el presupuesto antes de presentar"},
+    "decision_proceso": {"met": true, "comment": "mapeo el proceso y a los decisores de compra"},
+    "decision_plazos": {"met": true, "comment": "indago los plazos para tomar la decision"},
+    "decision_siguiente_paso": {"met": true, "comment": "cerro con un siguiente paso concreto"}
+  },
+  "disc_adaptation": {"score": 0, "comment": "que tanto se adapto al perfil DISC del cliente (0-10)"},
+  "puntos_fuertes": "2-3 frases con lo mejor que hizo el ejecutivo",
+  "oportunidades": "2-3 frases con lo que debe mejorar",
+  "recomendacion": "1 recomendacion practica y accionable para su proximo roleplay",
   "general": "conclusion de 2 lineas con lo mejor y lo que debe mejorar"
 }`;
 }
@@ -210,11 +228,11 @@ function generateProfile(discKey, industryKey, rolKey, paisKey) {
   return { discKey, industry, industryKey, rol, rolKey, paisKey, nombre, cargo };
 }
 
-async function callClaude(messages, system, maxTokens = 300) {
+async function callClaude(messages, system, maxTokens = 300, model) {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, system, maxTokens }),
+    body: JSON.stringify({ messages, system, maxTokens, ...(model ? { model } : {}) }),
   });
   const data = await res.json();
   return data.text || "";
@@ -293,46 +311,41 @@ export default function App() {
   const messagesRef = useRef([]);
   const phaseRef = useRef("lobby");
   const loadingRef = useRef(false);
+  const transcriptRef = useRef("");
 
   const [selectedDisc, setSelectedDisc] = useState(null);
   const [selectedIndustry, setSelectedIndustry] = useState(null);
   const [selectedRol, setSelectedRol] = useState(null);
   const [selectedPais, setSelectedPais] = useState(null);
 
-  const [authed, setAuthed] = useState(false);
-  const [pwInput, setPwInput] = useState("");
-  const [authError, setAuthError] = useState("");
-  const [authLoading, setAuthLoading] = useState(false);
+  // ── Modo widget de Zoho ──
+  const [zohoMode, setZohoMode] = useState(false);
+  const [zohoUser, setZohoUser] = useState(null);
+  const [zohoSave, setZohoSave] = useState("idle"); // idle|saving|saved|error
+  const [zohoRecordId, setZohoRecordId] = useState(null);
+  const [micBlocked, setMicBlocked] = useState(false);
+  const zohoUserRef = useRef(null);
+  useEffect(() => { zohoUserRef.current = zohoUser; }, [zohoUser]);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { loadingRef.current = loading; }, [loading]);
-  useEffect(() => {
-    try { if (sessionStorage.getItem("gv_auth") === "1") setAuthed(true); } catch {}
-  }, []);
 
-  const tryLogin = async () => {
-    setAuthError("");
-    setAuthLoading(true);
-    try {
-      const res = await fetch("/api/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: pwInput }),
-      });
-      const data = await res.json();
-      if (res.ok && data.ok) {
-        try { sessionStorage.setItem("gv_auth", "1"); } catch {}
-        setAuthed(true);
-        setPwInput("");
-      } else {
-        setAuthError("Contraseña incorrecta.");
-      }
-    } catch {
-      setAuthError("Error de conexión. Intenta de nuevo.");
-    }
-    setAuthLoading(false);
-  };
+  // Deteccion del modo widget. Inicializamos el SDK cuando la app corre
+  // embebida (iframe) o con ?source=zoho. Si PageLoad dispara (inZoho),
+  // estamos dentro del contenedor de Zoho: tomamos al usuario logueado como
+  // Owner del registro. No hay login: el acceso es solo desde Zoho.
+  useEffect(() => {
+    if (!isEmbedded() && !isZohoSource()) return;
+    initZoho()
+      .then(({ user, inZoho }) => {
+        if (inZoho) {
+          setZohoMode(true);
+          setZohoUser(user);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const stopListening = () => {
     if (recRef.current) { try { recRef.current.abort(); } catch {} recRef.current = null; }
@@ -350,7 +363,13 @@ export default function App() {
     rec.interimResults = false;
     rec.onstart = () => setListening(true);
     rec.onend = () => setListening(false);
-    rec.onerror = () => setListening(false);
+    rec.onerror = (e) => {
+      setListening(false);
+      // El iframe del widget de Zoho puede no propagar el permiso de microfono.
+      if (e && (e.error === "not-allowed" || e.error === "service-not-allowed")) {
+        setMicBlocked(true);
+      }
+    };
     rec.onresult = (e) => {
       const text = e.results[0][0].transcript;
       if (text.trim()) sendVoice(text, profileSnap);
@@ -414,9 +433,41 @@ export default function App() {
     setPhase("briefing");
   };
 
+  // Abre el simulador a pantalla completa en una pestaña nueva. Sirve de
+  // fallback cuando el iframe del widget bloquea el microfono (la voz no
+  // funciona dentro del popup de Zoho). En esa pestaña el resultado NO se
+  // guarda solo en Zoho — es para practicar con voz.
+  const openFullscreen = () => {
+    try {
+      window.open(window.location.origin + window.location.pathname, "_blank", "noopener");
+    } catch {}
+  };
+
+  // Verifica el acceso al microfono antes de arrancar. Si el contenedor lo
+  // bloquea (politica de permisos del iframe), lo marcamos para ofrecer el
+  // fallback a pantalla completa.
+  const checkMic = async () => {
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(t => t.stop());
+        setMicBlocked(false);
+        return true;
+      }
+    } catch (e) {
+      if (e && (e.name === "NotAllowedError" || e.name === "SecurityError")) {
+        setMicBlocked(true);
+        return false;
+      }
+    }
+    return true;
+  };
+
   const beginCall = async (profileSnap) => {
     setPhase("call");
     phaseRef.current = "call";
+    const micOk = await checkMic();
+    if (!micOk) { setPhase("briefing"); phaseRef.current = "briefing"; return; }
     setLoading(true);
     loadingRef.current = true;
     const sys = buildSystemPrompt(profileSnap);
@@ -439,21 +490,63 @@ export default function App() {
     const transcript = messagesRef.current.map(m =>
       `${m.role === "user" ? "EJECUTIVO" : profile.nombre}: ${m.content}`
     ).join("\n\n");
+    transcriptRef.current = transcript;
 
     const evalSys = buildEvaluatorPrompt(transcript, profile.discKey, profile.industry, profile.paisKey);
     const raw = await callClaude(
       [{ role: "user", content: "Evalua esta simulacion." }],
       evalSys,
-      800
+      1400,
+      "claude-sonnet-4-6"
     );
 
+    let parsed = null;
     try {
       const clean = raw.replace(/```json|```/g, "").trim();
-      setEvaluation(JSON.parse(clean));
+      parsed = JSON.parse(clean);
+      setEvaluation(parsed);
     } catch {
       setEvaluation({ error: raw });
     }
     setPhase("results");
+
+    // En modo widget, persistimos el resultado en un registro nuevo de Zoho.
+    if (zohoMode && parsed && parsed.criterios) {
+      saveToZoho(parsed, profile);
+    }
+  };
+
+  // Crea el registro en Rolplay_Academia a nombre del usuario logueado.
+  const saveToZoho = async (parsed, prof) => {
+    setZohoSave("saving");
+    try {
+      const pais = PAISES[prof.paisKey];
+      const empleados = parseInt(String(prof.industry.size).replace(/\D/g, ""), 10);
+      const scenario = {
+        recordName: `${prof.nombre} · ${prof.cargo} · ${prof.industry.name}`,
+        disc: prof.discKey,
+        industria: prof.industry.name,
+        rol: prof.rolKey,
+        pais: pais ? pais.name : prof.paisKey,
+        cargo: prof.cargo,
+        nombre: prof.nombre,
+        empleados: Number.isFinite(empleados) ? empleados : null,
+        dificultad: DEFAULT_DIFICULTAD,
+      };
+      const apiData = buildRoleplayApiData({ scenario, evaluation: parsed, user: zohoUserRef.current, transcript: transcriptRef.current });
+      const res = await insertRoleplayRecord(apiData);
+      const rec = res && res.data && res.data[0];
+      if (rec && rec.code === "SUCCESS") {
+        setZohoRecordId(rec.details && rec.details.id);
+        setZohoSave("saved");
+      } else {
+        console.error("Zoho insert no-success:", res);
+        setZohoSave("error");
+      }
+    } catch (e) {
+      console.error("Zoho insert error:", e);
+      setZohoSave("error");
+    }
   };
 
   const reset = () => {
@@ -465,56 +558,6 @@ export default function App() {
   };
 
   const disc = profile ? DISC_PROFILES[profile.discKey] : null;
-
-  // ── Pantalla de seguridad (login) ──
-  if (!authed) {
-    return (
-      <div style={{
-        minHeight: "100vh", background: "#0B0F1A", color: "#F0F4FF",
-        fontFamily: "'DM Sans', sans-serif",
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        padding: "24px 20px", gap: 18,
-      }}>
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Syne:wght@700;800&display=swap'); *{box-sizing:border-box;margin:0;padding:0;} input:focus{outline:none;}`}</style>
-        <div style={{ fontSize: 40 }}>🔒</div>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 22, fontWeight: 800 }}>Simulador de Ventas</div>
-          <div style={{ fontSize: 12, color: "#3A4A6A", marginTop: 4 }}>Ingresa la contraseña para continuar</div>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%", maxWidth: 320 }}>
-          <input
-            type="password"
-            value={pwInput}
-            onChange={(e) => setPwInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && pwInput && !authLoading) tryLogin(); }}
-            placeholder="Contraseña"
-            autoFocus
-            style={{
-              background: "#111827", border: `2px solid ${authError ? "#EF4444" : "#1E2D45"}`,
-              borderRadius: 12, padding: "14px 16px", color: "#F0F4FF", fontSize: 14,
-              fontFamily: "'DM Sans', sans-serif",
-            }}
-          />
-          {authError && <div style={{ fontSize: 12, color: "#EF4444" }}>{authError}</div>}
-          <button
-            onClick={() => pwInput && !authLoading && tryLogin()}
-            disabled={!pwInput || authLoading}
-            style={{
-              background: pwInput && !authLoading ? "linear-gradient(135deg, #0066FF, #0044CC)" : "#1A2235",
-              border: "none", borderRadius: 12, padding: "14px",
-              color: pwInput && !authLoading ? "#fff" : "#1E2D45",
-              fontSize: 14, fontWeight: 700, cursor: pwInput && !authLoading ? "pointer" : "not-allowed",
-              fontFamily: "'Syne', sans-serif",
-            }}>
-            {authLoading ? "Verificando..." : "Ingresar"}
-          </button>
-        </div>
-        <div style={{ fontSize: 10, color: "#162035", textAlign: "center" }}>
-          GeoVictoria · Entrenamiento Comercial
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div style={{
@@ -678,6 +721,20 @@ export default function App() {
       {/* ── BRIEFING ── */}
       {phase === "briefing" && disc && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "20px 16px", gap: 16, maxWidth: 480, margin: "0 auto", width: "100%" }}>
+          {micBlocked && (
+            <div style={{ background: "#F59E0B12", border: "1px solid #F59E0B44", borderRadius: 12, padding: "14px 16px" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#F59E0B", marginBottom: 6 }}>🎙️ Micrófono bloqueado</div>
+              <div style={{ fontSize: 12, color: "#B98A4A", lineHeight: 1.6, marginBottom: 10 }}>
+                El roleplay usa voz, pero el contenedor de Zoho no está permitiendo el micrófono en este popup.
+                Ábrelo a pantalla completa para practicar con voz. (En esa pestaña el resultado no se guarda solo en Zoho.)
+              </div>
+              <button className="btn" onClick={openFullscreen} style={{
+                background: "linear-gradient(135deg, #F59E0B, #D97706)", border: "none", borderRadius: 10,
+                padding: "10px 14px", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
+                fontFamily: "'Syne', sans-serif",
+              }}>Abrir a pantalla completa ↗</button>
+            </div>
+          )}
           <div style={{ textAlign: "center", paddingTop: 12 }}>
             <div style={{ fontSize: 11, color: "#4D9FFF", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".6px", marginBottom: 6 }}>Tu prospecto de hoy</div>
             <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 22, fontWeight: 800 }}>{profile.nombre}</div>
@@ -769,6 +826,18 @@ export default function App() {
             </div>
           </div>
 
+          {micBlocked && (
+            <div style={{ position: "relative", zIndex: 2, margin: "0 16px", background: "#F59E0B14", border: "1px solid #F59E0B55", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ fontSize: 11, color: "#F0C070", lineHeight: 1.5, flex: 1 }}>
+                🎙️ El micrófono está bloqueado en este popup de Zoho. Ábrelo a pantalla completa para usar la voz.
+              </div>
+              <button className="btn" onClick={openFullscreen} style={{
+                background: "#F59E0B22", border: "1px solid #F59E0B66", color: "#F59E0B",
+                borderRadius: 8, padding: "6px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+              }}>Pantalla completa ↗</button>
+            </div>
+          )}
+
           {/* Main — avatar + status */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20, position: "relative", zIndex: 1 }}>
             <Avatar nombre={profile.nombre} disc={profile.discKey} speaking={clientSpeaking} size={130} />
@@ -854,25 +923,59 @@ export default function App() {
             <div style={{ fontSize: 12, color: "#3A4A6A" }}>{profile.nombre} · DISC {profile.discKey} · {profile.industry.name}</div>
           </div>
 
+          {/* Estado de guardado en Zoho (solo modo widget) */}
+          {zohoMode && (
+            <div style={{
+              marginBottom: 16, borderRadius: 12, padding: "12px 14px",
+              display: "flex", alignItems: "center", gap: 10, fontSize: 12, fontWeight: 600,
+              background: zohoSave === "saved" ? "#10B98112" : zohoSave === "error" ? "#EF444412" : "#0A1628",
+              border: `1px solid ${zohoSave === "saved" ? "#10B98144" : zohoSave === "error" ? "#EF444444" : "#1E2D45"}`,
+              color: zohoSave === "saved" ? "#10B981" : zohoSave === "error" ? "#EF4444" : "#4D9FFF",
+            }}>
+              {zohoSave === "saving" && <><span className="dot" style={{ width: 8, height: 8, borderRadius: "50%", background: "#4D9FFF" }} /> Guardando resultado en Zoho...</>}
+              {zohoSave === "saved" && <>✓ Resultado guardado en Zoho{zohoUser?.full_name ? ` a nombre de ${zohoUser.full_name}` : ""}.</>}
+              {zohoSave === "error" && <>⚠ No se pudo guardar en Zoho. Revisa los permisos del widget e inténtalo de nuevo.</>}
+              {zohoSave === "error" && (
+                <button className="btn" onClick={() => saveToZoho(evaluation, profile)} style={{
+                  marginLeft: "auto", background: "#EF444422", border: "1px solid #EF444455",
+                  color: "#EF4444", borderRadius: 8, padding: "5px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer",
+                }}>Reintentar</button>
+              )}
+            </div>
+          )}
+
           {evaluation.error ? (
             <div style={{ background: "#1A2235", borderRadius: 12, padding: 16, fontSize: 12, color: "#6B7A99" }}>{evaluation.error}</div>
           ) : (
+            (() => {
+              const stageView = deriveStageView(evaluation);
+              return (
             <>
-              {/* Scores */}
+              {/* Scores por etapa (derivados de los criterios cumplidos) */}
               <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-                {ETAPAS.map(etapa => {
-                  const ev = evaluation[etapa.key];
+                {STAGES.map(etapa => {
+                  const ev = stageView[etapa.key];
                   if (!ev) return null;
                   return (
                     <div key={etapa.key} style={{
                       background: "#111827", border: "1px solid #1E1E2E",
                       borderRadius: 12, padding: "12px 14px",
-                      display: "flex", alignItems: "center", gap: 12,
+                      display: "flex", alignItems: "flex-start", gap: 12,
                     }}>
                       <ScoreBadge score={ev.score} />
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>{etapa.label}</div>
-                        <div style={{ fontSize: 11, color: "#4A5A7A" }}>{ev.comment}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, display: "flex", justifyContent: "space-between" }}>
+                          <span>{etapa.label}</span>
+                          <span style={{ fontSize: 11, color: "#3A4A6A", fontWeight: 600 }}>{ev.met}/{ev.total}</span>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                          {ev.items.map(it => (
+                            <div key={it.key} style={{ fontSize: 11, color: it.met ? "#7FA88F" : "#5A6A8A", display: "flex", gap: 6 }}>
+                              <span style={{ color: it.met ? "#10B981" : "#EF4444" }}>{it.met ? "✓" : "✗"}</span>
+                              <span>{it.label}</span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   );
@@ -896,7 +999,7 @@ export default function App() {
 
               {/* Overall score */}
               {(() => {
-                const scores = [...ETAPAS.map(e => evaluation[e.key]?.score || 0), evaluation.disc_adaptation?.score || 0];
+                const scores = [...STAGES.map(e => stageView[e.key]?.score || 0), evaluation.disc_adaptation?.score || 0];
                 const avg = Math.round(scores.reduce((a,b) => a+b, 0) / scores.length);
                 const color = avg >= 7 ? "#10B981" : avg >= 4 ? "#F59E0B" : "#EF4444";
                 return (
@@ -918,20 +1021,34 @@ export default function App() {
                 </div>
               )}
             </>
+              );
+            })()
           )}
 
           <div style={{ display: "flex", gap: 10 }}>
-            <button className="btn" onClick={() => { setPhase("lobby"); setSelectedDisc(null); setSelectedIndustry(null); setSelectedRol(null); setSelectedPais(null); }} style={{
-              flex: 1, background: "linear-gradient(135deg, #0066FF, #0044CC)",
-              border: "none", borderRadius: 12, padding: "14px",
-              color: "#fff", fontSize: 13, fontWeight: 700,
-              cursor: "pointer", transition: "all .2s",
-              fontFamily: "'Syne', sans-serif",
-            }}>Nueva simulacion →</button>
-            <button className="btn" onClick={() => { setPhase("lobby"); setSelectedDisc(null); setSelectedIndustry(null); setSelectedRol(null); setSelectedPais(null); setProfile(null); setMessages([]); setEvaluation(null); setTurnCount(0); }} style={{
-              width: 48, background: "#111827", border: "1px solid #1E1E2E",
-              borderRadius: 12, cursor: "pointer", fontSize: 18, transition: "all .2s",
-            }}>🏠</button>
+            {zohoMode ? (
+              <button className="btn" onClick={() => closeWidget()} disabled={zohoSave === "saving"} style={{
+                flex: 1, background: zohoSave === "saving" ? "#1A2235" : "linear-gradient(135deg, #0066FF, #0044CC)",
+                border: "none", borderRadius: 12, padding: "14px",
+                color: zohoSave === "saving" ? "#3A4A6A" : "#fff", fontSize: 13, fontWeight: 700,
+                cursor: zohoSave === "saving" ? "not-allowed" : "pointer", transition: "all .2s",
+                fontFamily: "'Syne', sans-serif",
+              }}>{zohoSave === "saving" ? "Guardando..." : "Cerrar"}</button>
+            ) : (
+              <>
+                <button className="btn" onClick={() => { setPhase("lobby"); setSelectedDisc(null); setSelectedIndustry(null); setSelectedRol(null); setSelectedPais(null); }} style={{
+                  flex: 1, background: "linear-gradient(135deg, #0066FF, #0044CC)",
+                  border: "none", borderRadius: 12, padding: "14px",
+                  color: "#fff", fontSize: 13, fontWeight: 700,
+                  cursor: "pointer", transition: "all .2s",
+                  fontFamily: "'Syne', sans-serif",
+                }}>Nueva simulacion →</button>
+                <button className="btn" onClick={() => { setPhase("lobby"); setSelectedDisc(null); setSelectedIndustry(null); setSelectedRol(null); setSelectedPais(null); setProfile(null); setMessages([]); setEvaluation(null); setTurnCount(0); }} style={{
+                  width: 48, background: "#111827", border: "1px solid #1E1E2E",
+                  borderRadius: 12, cursor: "pointer", fontSize: 18, transition: "all .2s",
+                }}>🏠</button>
+              </>
+            )}
           </div>
         </div>
       )}

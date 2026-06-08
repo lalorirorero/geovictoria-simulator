@@ -1,0 +1,21 @@
+{
+  "service": "CRM",
+  "whiteListedDomains": [
+    "https://geovictoria-simulator.vercel.app"
+  ],
+  "cspDomains": {
+    "child-src": ["https://geovictoria-simulator.vercel.app"],
+    "frame-src": ["https://geovictoria-simulator.vercel.app"],
+    "connect-src": ["https://geovictoria-simulator.vercel.app"]
+  },
+  "modules": {
+    "widgets": [
+      {
+        "location": "crm.custombutton",
+        "name": "geovictoria_roleplay",
+        "url": "/app/widget.html",
+        "description": "Roleplay de ventas GeoVictoria (Primera Reunion)"
+      }
+    ]
+  }
+}
