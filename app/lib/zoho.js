@@ -47,35 +47,40 @@ export function loadZohoSdk() {
 }
 
 let initPromise = null;
-// Inicializa el SDK y devuelve { ZOHO, pageData, user }.
-// pageData trae el contexto del boton (Entity, EntityId, etc.) cuando
-// el widget se abre desde un boton de registro/lista.
+// Inicializa el SDK y devuelve { ZOHO, pageData, user, inZoho }.
+// - pageData: contexto del boton cuando el widget se abre desde la lista,
+//   p. ej. { Entity, EntityId: [...], ButtonPosition: "ListView" }.
+// - inZoho: true solo si el evento PageLoad realmente disparo, es decir,
+//   estamos corriendo DENTRO del contenedor de Zoho (no un iframe cualquiera).
+//   Lo usamos como senal segura para saltar el login.
 export function initZoho() {
   if (initPromise) return initPromise;
   initPromise = (async () => {
     const ZOHO = await loadZohoSdk();
-    const pageData = await new Promise((resolve) => {
+    const result = await new Promise((resolve) => {
       let settled = false;
-      const done = (d) => {
+      const done = (pageData, inZoho) => {
         if (settled) return;
         settled = true;
-        resolve(d || {});
+        resolve({ pageData: pageData || {}, inZoho });
       };
       try {
-        ZOHO.embeddedApp.on("PageLoad", (d) => done(d));
+        ZOHO.embeddedApp.on("PageLoad", (d) => done(d, true));
         ZOHO.embeddedApp.init();
       } catch (e) {
-        done({});
+        done({}, false);
       }
-      // Salvaguarda: no bloquear para siempre si PageLoad no llega.
-      setTimeout(() => done({}), 8000);
+      // Salvaguarda: si PageLoad no llega (no estamos en Zoho), seguimos.
+      setTimeout(() => done({}, false), 8000);
     });
     let user = null;
-    try {
-      const res = await ZOHO.CRM.CONFIG.getCurrentUser();
-      user = (res && res.users && res.users[0]) || null;
-    } catch {}
-    return { ZOHO, pageData, user };
+    if (result.inZoho) {
+      try {
+        const res = await ZOHO.CRM.CONFIG.getCurrentUser();
+        user = (res && res.users && res.users[0]) || null;
+      } catch {}
+    }
+    return { ZOHO, pageData: result.pageData, user, inZoho: result.inZoho };
   })();
   return initPromise;
 }
@@ -91,12 +96,16 @@ export async function insertRoleplayRecord(apiData) {
   return res;
 }
 
-// Cierra el popup del widget (si Zoho lo abrio como popup).
+// Cierra el popup del widget. Usa closeReload() para refrescar la vista de
+// lista (y que el registro recien creado aparezca); cae a close() si no esta.
 export async function closeWidget() {
   try {
     const ZOHO = await loadZohoSdk();
-    if (ZOHO && ZOHO.CRM && ZOHO.CRM.UI && ZOHO.CRM.UI.Popup && ZOHO.CRM.UI.Popup.close) {
-      await ZOHO.CRM.UI.Popup.close();
+    const Popup = ZOHO && ZOHO.CRM && ZOHO.CRM.UI && ZOHO.CRM.UI.Popup;
+    if (Popup && Popup.closeReload) {
+      await Popup.closeReload();
+    } else if (Popup && Popup.close) {
+      await Popup.close();
     }
   } catch {}
 }

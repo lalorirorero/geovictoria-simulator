@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { selectChunks, formatChunks } from "./data/kb";
-import { initZoho, insertRoleplayRecord, closeWidget, isZohoSource } from "./lib/zoho";
+import { initZoho, insertRoleplayRecord, closeWidget, isZohoSource, isEmbedded } from "./lib/zoho";
 import {
   INDUSTRY_MAP, ROL_MAP, DEFAULT_DIFICULTAD,
   STAGES, deriveStageView, buildRoleplayApiData,
@@ -337,15 +337,21 @@ export default function App() {
     try { if (sessionStorage.getItem("gv_auth") === "1") setAuthed(true); } catch {}
   }, []);
 
-  // Si el simulador se abre desde Zoho (?source=zoho), la sesion de Zoho
-  // es la autenticacion: saltamos la pantalla de contraseña e inicializamos
-  // el SDK para obtener al usuario logueado (futuro Owner del registro).
+  // Deteccion del modo widget. Inicializamos el SDK cuando la app corre
+  // embebida (iframe) o con ?source=zoho. Solo activamos zohoMode y saltamos
+  // el login si PageLoad realmente dispara (inZoho), es decir, estamos dentro
+  // del contenedor de Zoho — no en un iframe ajeno. La sesion de Zoho es la
+  // autenticacion y el usuario logueado sera el Owner del registro.
   useEffect(() => {
-    if (!isZohoSource()) return;
-    setZohoMode(true);
-    setAuthed(true);
+    if (!isEmbedded() && !isZohoSource()) return;
     initZoho()
-      .then(({ user }) => setZohoUser(user))
+      .then(({ user, inZoho }) => {
+        if (inZoho) {
+          setZohoMode(true);
+          setAuthed(true);
+          setZohoUser(user);
+        }
+      })
       .catch(() => {});
   }, []);
 

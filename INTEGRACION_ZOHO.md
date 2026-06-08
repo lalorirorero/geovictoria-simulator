@@ -16,15 +16,23 @@ módulo, **a nombre del usuario logueado**.
 
 ## Cómo funciona (resumen técnico)
 
-1. El widget es **esta misma app Next.js** (la que ya está en Vercel),
-   abierta con el parámetro `?source=zoho`.
-2. Al detectar `?source=zoho`, la app:
+1. El widget es **esta misma app Next.js** (la que ya está en Vercel).
+2. La app carga el **Zoho Embedded App SDK** y llama
+   `ZOHO.embeddedApp.on("PageLoad", …)` + `ZOHO.embeddedApp.init()`. El evento
+   `PageLoad` **solo dispara dentro del contenedor de Zoho**; cuando dispara,
+   la app sabe que está corriendo como widget y entonces:
    - Salta la pantalla de contraseña (la sesión de Zoho es la autenticación).
-   - Carga el **Zoho Embedded App SDK** y obtiene al **usuario logueado**.
+   - Obtiene al **usuario logueado** con `ZOHO.CRM.CONFIG.getCurrentUser()`.
+   - (Un iframe ajeno **no** recibe `PageLoad`, así que el login no se salta
+     fuera de Zoho. El parámetro `?source=zoho` es opcional: solo adelanta la
+     carga del SDK.)
 3. El usuario configura el escenario y hace el roleplay como siempre.
 4. Al colgar, el coach evalúa la conversación y la app crea un registro con
-   `ZOHO.CRM.API.insertRecord`. Como la llamada usa la **sesión del usuario**,
-   el registro queda creado y **asignado a su nombre** (campo `Owner`).
+   `ZOHO.CRM.API.insertRecord({Entity:"Rolplay_Academia", APIData:{…}})`. Como
+   la llamada usa la **sesión del usuario**, el registro queda creado y
+   **asignado a su nombre** (campo `Owner`).
+5. Al pulsar **Cerrar**, la app llama `ZOHO.CRM.UI.Popup.closeReload()`, que
+   cierra el popup y **refresca la lista** para que el registro nuevo aparezca.
 
 Archivos relevantes:
 - `app/lib/zoho.js` — carga e inicialización del SDK, `insertRecord`, cierre.
@@ -58,20 +66,25 @@ https://geovictoria-simulator.vercel.app/?source=zoho
 
 ## Paso 2 — Registrar el widget en Zoho (hosting externo)
 
-1. En Zoho CRM ve a **Configuración (Setup) → Desarrollador / Developer Space
-   → Widgets** (también accesible como *Developer Hub → Widgets*).
-2. **Crear widget**:
-   - **Nombre:** `Roleplay GeoVictoria`
-   - **Tipo:** `Related List` no — elige **`Button`** (o "Web Tab" si además
-     quieres un tab). Para el botón de la lista, el tipo del widget no es
-     crítico; lo que importa es el **hosting** y la **URL base**.
+1. En Zoho CRM ve a **Setup (Configuración) → Developer Space (Espacio de
+   Desarrollador) → Widgets** y pulsa **Create New Widget** (Crear widget).
+2. Completa el formulario:
+   - **Name:** `Roleplay GeoVictoria`
+   - **Type:** `Button` (si el formulario lo pide; es el tipo de widget que se
+     invoca desde un botón).
    - **Hosting:** **External** (Hospedaje externo).
-   - **Base URL:** `https://geovictoria-simulator.vercel.app/?source=zoho`
-3. Guarda. Zoho te dará un widget que podrás asociar a un botón.
+   - **Base URL:** la URL pública de la app en Vercel, p. ej.
+     `https://geovictoria-simulator.vercel.app/`
+     (la raíz sirve la app; funciona como `index.html` del widget).
+     Puedes añadir `?source=zoho` al final, pero **no es obligatorio**: la app
+     detecta sola que corre dentro de Zoho.
+3. Guarda. Quedará un widget que podrás asociar a un botón en el Paso 3.
 
-> Alternativa por paquete (Sigma/ZIP): si prefieres empaquetarlo como
-> extensión en vez de URL externa, dilo y agrego un `plugin-manifest.json`.
-> Para este caso elegimos **URL externa en Vercel**, que es lo más simple.
+> **¿Hosting interno o paquete (ZET/Sigma)?** El `plugin-manifest.json` y el
+> CLI `zet` solo son necesarios si hospedas el widget *dentro* de Zoho (zip) o
+> lo publicas como extensión en el Marketplace. Para **URL externa en Vercel**
+> no hace falta manifest: basta la Base URL. Si prefieres empaquetarlo como
+> extensión, dilo y agrego el `plugin-manifest.json` + estructura ZET.
 
 ---
 
@@ -170,10 +183,12 @@ completa** de la conversación (hoy el módulo solo guarda audio por URL en
 
 ## Probar
 
-1. Abre directamente `https://…/?source=zoho` fuera de Zoho: verás que **no**
-   pide contraseña y que el banner de "Guardando en Zoho" aparece al terminar
-   (fallará el guardado porque no hay SDK de Zoho — es lo esperado fuera del
-   iframe).
+1. Fuera de Zoho la app se comporta normal: **sí** pide contraseña (el login
+   solo se salta dentro del contenedor de Zoho, cuando dispara `PageLoad`).
 2. Dentro de Zoho, pulsa **Ejecutar Roleplay**, completa un roleplay corto y
-   verifica que se crea un registro nuevo en *Roleplays Academia* a tu nombre,
-   con `Estado = Evaluado` y los criterios marcados.
+   verifica que:
+   - No pidió contraseña.
+   - Al terminar aparece el banner "Resultado guardado en Zoho a nombre de …".
+   - Se creó un registro nuevo en *Roleplays Academia* a tu nombre, con
+     `Estado = Evaluado`, el escenario y los criterios marcados.
+   - Al pulsar **Cerrar**, la lista se refresca y muestra el registro nuevo.
