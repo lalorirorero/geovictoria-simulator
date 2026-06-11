@@ -154,6 +154,7 @@ REGLAS ABSOLUTAS:
 - Tus objeciones deben reflejar tu rol: si eres TI preguntas por integraciones, si eres RRHH por cumplimiento legal, si eres Operaciones por costo y tiempo
 ${idiomaRule}
 - Si el vendedor no sigue el orden Sandler, reacciona con resistencia natural
+- NUNCA uses acotaciones ni narres acciones, gestos, posturas, emociones ni pensamientos. Prohibido usar asteriscos (*...*), corchetes [..] o descripciones tipo "levanta una ceja" o "se queda pensativo". Habla SOLO lo que dirias en voz alta en una llamada telefonica.
 - NO rompas el personaje nunca
 - Responde solo como cliente, nunca como IA
 - Comienza la llamada con una bienvenida breve segun tu personalidad DISC`;
@@ -219,6 +220,18 @@ Responde SOLO en JSON con este formato exacto:
 
 // ─── UTILS ───────────────────────────────────────────────────────
 function randomFrom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+// Deja solo el dialogo hablado: elimina acotaciones escenicas que el modelo
+// pueda colar (*gestos*, [acciones]) para que el TTS no las lea en voz alta.
+function spokenOnly(text) {
+  if (!text) return "";
+  return String(text)
+    .replace(/\*[^*]*\*/g, " ")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/_[^_]*_/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
 
 function generateProfile(discKey, industryKey, rolKey, paisKey) {
   const industry = INDUSTRIES[industryKey];
@@ -312,6 +325,9 @@ export default function App() {
   const phaseRef = useRef("lobby");
   const loadingRef = useRef(false);
   const transcriptRef = useRef("");
+  const listenModeRef = useRef(false);     // el usuario tiene su turno abierto
+  const transcriptBufferRef = useRef("");  // acumula lo dicho en el turno
+  const lastReplyRef = useRef("");          // ultima respuesta del cliente (para reintentar voz)
 
   const [selectedDisc, setSelectedDisc] = useState(null);
   const [selectedIndustry, setSelectedIndustry] = useState(null);
@@ -324,6 +340,7 @@ export default function App() {
   const [zohoSave, setZohoSave] = useState("idle"); // idle|saving|saved|error
   const [zohoRecordId, setZohoRecordId] = useState(null);
   const [micBlocked, setMicBlocked] = useState(false);
+  const [voiceError, setVoiceError] = useState(""); // error de TTS/respuesta
   const zohoUserRef = useRef(null);
   useEffect(() => { zohoUserRef.current = zohoUser; }, [zohoUser]);
 
@@ -348,37 +365,76 @@ export default function App() {
   }, []);
 
   const stopListening = () => {
+    listenModeRef.current = false;
     if (recRef.current) { try { recRef.current.abort(); } catch {} recRef.current = null; }
     setListening(false);
   };
 
-  const autoListen = (profileSnap) => {
-    if (phaseRef.current !== "call") return;
+  // Crea un reconocedor y lo arranca. Mientras el usuario mantenga su turno
+  // abierto (listenModeRef), se REINICIA solo si la Web Speech API se corta por
+  // pausas largas, no-speech o errores de red. Acumula todo lo dicho en el turno
+  // (continuous + interimResults), de modo que las pausas NO terminan el turno.
+  const startRecognizer = (profileSnap) => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) return;
-    stopListening();
+    if (!SR) { setVoiceError("Tu navegador no soporta dictado por voz. Usa Chrome o Edge en computador."); return; }
     const rec = new SR();
     rec.lang = (profileSnap && PAISES[profileSnap.paisKey] && PAISES[profileSnap.paisKey].lang) || "es-CL";
-    rec.continuous = false;
-    rec.interimResults = false;
+    rec.continuous = true;
+    rec.interimResults = true;
     rec.onstart = () => setListening(true);
-    rec.onend = () => setListening(false);
-    rec.onerror = (e) => {
-      setListening(false);
-      // El iframe del widget de Zoho puede no propagar el permiso de microfono.
-      if (e && (e.error === "not-allowed" || e.error === "service-not-allowed")) {
-        setMicBlocked(true);
-      }
-    };
     rec.onresult = (e) => {
-      const text = e.results[0][0].transcript;
-      if (text.trim()) sendVoice(text, profileSnap);
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) transcriptBufferRef.current += r[0].transcript + " ";
+        else interim += r[0].transcript;
+      }
+      setLastUserLine((transcriptBufferRef.current + interim).trim());
+    };
+    rec.onerror = (e) => {
+      if (e && (e.error === "not-allowed" || e.error === "service-not-allowed")) {
+        listenModeRef.current = false;
+        setMicBlocked(true);
+        setListening(false);
+      }
+      // no-speech / network / aborted: dejamos que onend decida reiniciar.
+    };
+    rec.onend = () => {
+      // Resiliencia: si el usuario sigue en su turno y la llamada continua,
+      // reabrimos el microfono en vez de morir en silencio.
+      if (listenModeRef.current && phaseRef.current === "call") {
+        try { startRecognizer(profileSnap); return; } catch {}
+      }
+      setListening(false);
     };
     recRef.current = rec;
     try { rec.start(); } catch {}
   };
 
+  // El usuario abre su turno (toca para hablar).
+  const beginListening = (profileSnap) => {
+    if (loadingRef.current || clientSpeaking) return;
+    setVoiceError("");
+    transcriptBufferRef.current = "";
+    setLastUserLine("");
+    listenModeRef.current = true;
+    startRecognizer(profileSnap);
+  };
+
+  // El usuario cierra su turno (toca para enviar) y se manda lo acumulado.
+  const endTurn = (profileSnap) => {
+    listenModeRef.current = false;
+    if (recRef.current) { try { recRef.current.stop(); } catch {} }
+    setListening(false);
+    const text = transcriptBufferRef.current.trim();
+    transcriptBufferRef.current = "";
+    if (text) sendVoice(text, profileSnap);
+    else setLastUserLine("");
+  };
+
   const speak = async (text, profileSnap) => {
+    lastReplyRef.current = text;
+    setVoiceError("");
     setClientSpeaking(true);
     try {
       const voiceId = getVoiceId(profileSnap.nombre, profileSnap.paisKey);
@@ -393,13 +449,21 @@ export default function App() {
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
         audioRef.current = audio;
-        audio.onended = () => { setClientSpeaking(false); autoListen(profileSnap); };
-        audio.play();
+        audio.onended = () => { setClientSpeaking(false); };
+        audio.onerror = () => { setClientSpeaking(false); setVoiceError("No se pudo reproducir la voz. Puedes leer la respuesta y seguir tu turno."); };
+        audio.play().catch(() => { setClientSpeaking(false); });
         return;
       }
     } catch {}
+    // La voz fallo: el texto del cliente sigue visible; el usuario puede leer
+    // y continuar su turno. No nos quedamos en silencio sin aviso.
     setClientSpeaking(false);
-    autoListen(profileSnap);
+    setVoiceError("Voz no disponible ahora. Puedes leer la respuesta y seguir tu turno.");
+  };
+
+  // Reintenta solo la voz de la ultima respuesta del cliente.
+  const retryVoice = () => {
+    if (lastReplyRef.current && profile) speak(lastReplyRef.current, profile);
   };
 
   const sendVoice = async (text, profileSnap) => {
@@ -415,12 +479,18 @@ export default function App() {
 
     const sys = buildSystemPrompt(profileSnap);
     const apiMessages = newMessages.map(m => ({ role: m.role, content: m.content }));
-    const reply = await callClaude(apiMessages, sys);
+    const raw = await callClaude(apiMessages, sys);
+    const reply = spokenOnly(raw);
+    setLoading(false);
+    loadingRef.current = false;
+    if (!reply) {
+      // Sin respuesta (rate limit u otro error): permitimos reintentar el turno.
+      setVoiceError("El cliente no respondio (puede ser saturacion momentanea). Vuelve a hablar para reintentar.");
+      return;
+    }
     const final = [...newMessages, { role: "assistant", content: reply }];
     setMessages(final);
     messagesRef.current = final;
-    setLoading(false);
-    loadingRef.current = false;
     setTurnCount(t => t + 1);
     speak(reply, profileSnap);
   };
@@ -474,13 +544,14 @@ export default function App() {
     const seed = PAISES[profileSnap.paisKey]?.lang === "pt-BR"
       ? "Olá, obrigado por atender a ligação."
       : "Hola, gracias por tomar la llamada.";
-    const opening = await callClaude([{ role: "user", content: seed }], sys);
-    const initial = [{ role: "assistant", content: opening }];
+    const opening = spokenOnly(await callClaude([{ role: "user", content: seed }], sys));
+    const initial = opening ? [{ role: "assistant", content: opening }] : [];
     setMessages(initial);
     messagesRef.current = initial;
     setLoading(false);
     loadingRef.current = false;
-    speak(opening, profileSnap);
+    if (opening) speak(opening, profileSnap);
+    else setVoiceError("El cliente no contesto (saturacion momentanea). Toca para hablar e inicia tu.");
   };
 
   const endCall = async () => {
@@ -550,11 +621,14 @@ export default function App() {
   };
 
   const reset = () => {
+    stopListening();
     setPhase("lobby");
     setProfile(null);
     setMessages([]);
     setEvaluation(null);
     setTurnCount(0);
+    setVoiceError("");
+    setLastUserLine("");
   };
 
   const disc = profile ? DISC_PROFILES[profile.discKey] : null;
@@ -865,7 +939,7 @@ export default function App() {
                   <span style={{ fontSize: 11, color: disc.color }}>Hablando...</span>
                 </>
               ) : (
-                <span style={{ fontSize: 11, color: "#2E3D5A" }}>En llamada</span>
+                <span style={{ fontSize: 11, color: "#10B981", fontWeight: 600 }}>Tu turno — toca Hablar</span>
               )}
             </div>
 
@@ -889,12 +963,43 @@ export default function App() {
             </div>
           )}
 
-          {/* Hang-up button */}
-          <div style={{ position: "relative", zIndex: 1, display: "flex", justifyContent: "center", paddingBottom: 36 }}>
+          {/* Voice error banner */}
+          {voiceError && (
+            <div style={{ position: "relative", zIndex: 2, margin: "0 16px 12px", background: "#F59E0B14", border: "1px solid #F59E0B55", borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ fontSize: 11, color: "#F0C070", lineHeight: 1.5, flex: 1 }}>🔇 {voiceError}</div>
+              <button className="btn" onClick={retryVoice} style={{
+                background: "#F59E0B22", border: "1px solid #F59E0B66", color: "#F59E0B",
+                borderRadius: 8, padding: "6px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+              }}>Reintentar voz</button>
+            </div>
+          )}
+
+          {/* Controls: turno (hablar/enviar) + colgar */}
+          <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 16, paddingBottom: 32 }}>
+            {(() => {
+              const busy = loading || clientSpeaking;
+              const label = listening ? "■  Enviar turno" : busy ? (loading ? "Procesando..." : "Escucha al cliente...") : "🎤  Toca para hablar";
+              const onClick = listening ? () => endTurn(profile) : () => beginListening(profile);
+              return (
+                <button className="btn"
+                  onClick={busy ? undefined : onClick}
+                  disabled={busy}
+                  style={{
+                    flex: 1, maxWidth: 320, height: 60, borderRadius: 16,
+                    background: listening ? "linear-gradient(135deg, #10B981, #059669)" : busy ? "#101725" : "linear-gradient(135deg, #0066FF, #0044CC)",
+                    border: listening ? "1px solid #10B98155" : "none",
+                    color: busy ? "#3A4A6A" : "#fff", fontSize: 15, fontWeight: 800,
+                    cursor: busy ? "default" : "pointer", fontFamily: "'Syne', sans-serif",
+                    boxShadow: listening ? "0 4px 24px #10B98155" : "none", transition: "all .2s",
+                  }}>
+                  {label}
+                </button>
+              );
+            })()}
             <button className="btn" onClick={endCall} title="Colgar y evaluar" style={{
-              width: 64, height: 64, borderRadius: "50%",
+              width: 60, height: 60, borderRadius: "50%",
               background: "linear-gradient(135deg, #EF4444, #DC2626)",
-              border: "none", cursor: "pointer", fontSize: 24,
+              border: "none", cursor: "pointer", fontSize: 22, flexShrink: 0,
               display: "flex", alignItems: "center", justifyContent: "center",
               boxShadow: "0 4px 24px #EF444466", transition: "all .2s",
             }}>📵</button>
